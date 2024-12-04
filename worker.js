@@ -1,8 +1,63 @@
-// 博客配置
+// 配置管理
 const CONFIG = {
-    title: '🕮 BAOER の BLOG 🕮',
-    favicon: 'https://pic.wtr.cc/i/2024/11/29/6749922b0967c.jpeg',
-    enablePasswordProtection: true  // 设置为true时启用密码验证，false时禁用
+    // 基础配置
+    site: {
+        title: '🕮 BAOER の BLOG 🕮',
+        favicon: 'https://pic.wtr.cc/i/2024/11/29/6749922b0967c.jpeg',
+        enablePasswordProtection: true,
+    },
+    // 字体配置
+    fonts: {
+        sans: "'LXGW WenKai', 'Noto Sans SC', 'HarmonyOS Sans SC', 'PingFang SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Microsoft YaHei', sans-serif",
+        serif: "'LXGW WenKai', 'Noto Serif SC', 'Source Han Serif SC', 'Source Han Serif', source-han-serif-sc, 'PT Serif', 'SongTi SC', serif",
+        mono: "'JetBrains Mono', 'LXGW WenKai Mono', Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace"
+    },
+    // 主题配置
+    theme: {
+        dark: {
+            mainBg: '#1a1a1a',
+            textColor: '#e0e0e0',
+            textColorSecondary: '#888888',
+            borderColor: '#30363d',
+            linkColor: '#60a5fa',
+            headerBg: '#242424',
+            contentBg: '#1e1e1e',
+            hoverBg: 'rgba(255, 255, 255, 0.05)',
+            codeBg: '#2d2d2d',
+            blockquoteBg: '#2d2d2d',
+            scrollbarColor: '#4a4a4a'
+        },
+        light: {
+            mainBg: '#f5f5f5',
+            textColor: '#2c3e50',
+            textColorSecondary: '#666666',
+            borderColor: '#e0e0e0',
+            linkColor: '#2563eb',
+            headerBg: '#f5f5f5',
+            contentBg: '#fffafa',
+            hoverBg: 'rgba(0, 0, 0, 0.05)',
+            codeBg: '#f0f0f0',
+            blockquoteBg: '#f3f4f6',
+            scrollbarColor: '#c0c0c0'
+        }
+    },
+    // 布局配置
+    layout: {
+        sidebarWidth: '250px',
+        boxShadow: '0 1px 3px rgba(0, 0, 0, 0.2)',
+        borderRadius: '12px',
+        mobileBreakpoint: '768px'
+    },
+    // API配置
+    api: {
+        cacheTime: 0, // 缓存时间（毫秒）
+        maxRetries: 3, // 最大重试次数
+        timeout: 8000 // 请求超时时间（毫秒）
+    },
+    // 分页配置
+    pagination: {
+        itemsPerPage: 5
+    }
 };
 
 // 古诗词数据
@@ -59,9 +114,304 @@ const POEMS = [
     }
 ];
 
+// 工具函数
+const utils = {
+    // 格式化日期
+    formatDate(date) {
+        const beijingDate = new Date(date.getTime() + 8 * 60 * 60 * 1000);
+        const year = beijingDate.getUTCFullYear();
+        const month = String(beijingDate.getUTCMonth() + 1).padStart(2, '0');
+        const day = String(beijingDate.getUTCDate()).padStart(2, '0');
+        const hour = String(beijingDate.getUTCHours()).padStart(2, '0');
+        const minute = String(beijingDate.getUTCMinutes()).padStart(2, '0');
+        return `${year}-${month}-${day} ${hour}:${minute}`;
+    },
+
+    // 转换为北京时间
+    convertToBeiJingTime(timestamp) {
+        const utcDate = new Date(Number(timestamp) * 1000);
+        return new Date(utcDate.getTime() + 8 * 60 * 60 * 1000);
+    },
+
+    // 生成随机诗词
+    getRandomPoem() {
+        return POEMS[Math.floor(Math.random() * POEMS.length)];
+    }
+};
+
+// API 处理模块
+const apiHandler = {
+    // 缓存对象
+    cache: {
+        posts: {
+            data: null,
+            timestamp: 0,
+            etag: null,
+            rateLimit: null
+        }
+    },
+
+    // 带重试的请求
+    async fetchWithRetry(url, options, env) {
+        const delays = [1000, 2000, 4000];
+        let lastError;
+
+        const headers = {
+            'User-Agent': 'CloudflareWorker',
+            'Accept': 'application/vnd.github.v3+json',
+            ...(options.headers || {}),
+        };
+
+        if (env.GITHUB_TOKEN) {
+            headers.Authorization = `Bearer ${env.GITHUB_TOKEN}`;
+        }
+
+        for (let i = 0; i < CONFIG.api.maxRetries; i++) {
+            try {
+                const controller = new AbortController();
+                const timeout = setTimeout(() => controller.abort(), CONFIG.api.timeout);
+
+                const response = await fetch(url, {
+                    ...options,
+                    headers,
+                    signal: controller.signal
+                });
+
+                clearTimeout(timeout);
+
+                const rateLimit = {
+                    limit: response.headers.get('X-RateLimit-Limit'),
+                    remaining: response.headers.get('X-RateLimit-Remaining'),
+                    reset: response.headers.get('X-RateLimit-Reset'),
+                    used: response.headers.get('X-RateLimit-Used')
+                };
+
+                console.log(`[API请求] URL: ${url}, 状态: ${response.status}, 剩余限额: ${rateLimit.remaining}`);
+
+                if (response.status === 403 && rateLimit.remaining === '0') {
+                    const resetDate = utils.convertToBeiJingTime(rateLimit.reset);
+                    throw new Error(`API 限制已达上限（${rateLimit.limit}次/时），将在 ${resetDate.toLocaleString('zh-CN', { hour12: false })} 重置`);
+                }
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                return { response, rateLimit };
+            } catch (error) {
+                lastError = error;
+                if (i === CONFIG.api.maxRetries - 1) break;
+
+                if (error.name === 'AbortError' || error.name === 'TypeError') {
+                    await new Promise(resolve => setTimeout(resolve, delays[i]));
+                    continue;
+                }
+                throw error;
+            }
+        }
+        throw lastError;
+    },
+
+    // 获取文章内容
+    async getPostContent(path, env) {
+        const response = await fetch(
+            `https://raw.githubusercontent.com/${env.GITHUB_OWNER}/${env.GITHUB_REPO}/main/${path}`,
+            {
+                headers: {
+                    'Authorization': `Bearer ${env.GITHUB_TOKEN}`,
+                    'User-Agent': 'CloudflareWorker'
+                }
+            }
+        );
+
+        if (!response.ok) {
+            throw new Error('Failed to fetch post content');
+        }
+
+        return await response.text();
+    }
+};
+
+// HTML生成模块
+const htmlGenerator = {
+    // 生成API限额信息HTML
+    generateApiLimitHtml(rateLimit) {
+        const used = parseInt(rateLimit.used) || 0;
+        const limit = parseInt(rateLimit.limit) || 1;
+        const remaining = parseInt(rateLimit.remaining) || 0;
+        const resetTime = utils.convertToBeiJingTime(rateLimit.reset);
+
+        return `
+            <div class="api-limit-info">
+                <p>API 限额: ${remaining} / ${limit}</p>
+                <p>🔑已使用: ${used}</p>
+                <p>🔄重置时间: ${resetTime.toLocaleTimeString('zh-CN', { hour12: false })}</p>
+                <div class="progress-bar">
+                    <div class="progress-bar-fill" style="width: ${(used / limit) * 100}%"></div>
+                </div>
+            </div>
+        `;
+    },
+
+    // 生成文章列表HTML
+    async generatePostList(env) {
+        try {
+            const now = Date.now();
+            const cache = apiHandler.cache.posts;
+
+            if (cache.data && (now - cache.timestamp) < CONFIG.api.cacheTime) {
+                return cache.data;
+            }
+
+            const apiUrl = `https://api.github.com/repos/${env.GITHUB_OWNER}/${env.GITHUB_REPO}/contents/`;
+            const { response, rateLimit } = await apiHandler.fetchWithRetry(apiUrl, {
+                headers: { 'If-None-Match': cache.etag || '' }
+            }, env);
+
+            if (response.status === 304 && cache.data) {
+                cache.timestamp = now;
+                return cache.data;
+            }
+
+            const files = await response.json();
+            const posts = files
+                .filter(file => (file.name.endsWith('.md') || file.name.endsWith('.pdf')) && file.name !== 'README.md')
+                .map(file => ({
+                    name: file.name,
+                    path: file.path,
+                    url: `/posts/${file.name}`,
+                    sha: file.sha,
+                    type: file.name.endsWith('.pdf') ? 'pdf' : 'markdown'
+                }));
+
+            const postsWithDates = await Promise.all(posts.map(async post => {
+                try {
+                    const encodedPath = encodeURIComponent(post.path);
+                    const { response: commitResponse } = await apiHandler.fetchWithRetry(
+                        `https://api.github.com/repos/${env.GITHUB_OWNER}/${env.GITHUB_REPO}/commits?path=${encodedPath}&page=1&per_page=1`,
+                        {
+                            headers: {
+                                'Authorization': `Bearer ${env.GITHUB_TOKEN}`,
+                                'Accept': 'application/vnd.github.v3+json',
+                                'User-Agent': 'CloudflareWorker'
+                            }
+                        },
+                        env
+                    );
+
+                    const commits = await commitResponse.json();
+                    post.lastModified = commits?.[0] ? new Date(commits[0].commit.committer.date) : null;
+                } catch (error) {
+                    console.error(`Error fetching commit info for ${post.path}:`, error);
+                    post.lastModified = null;
+                }
+                return post;
+            }));
+
+            postsWithDates.sort((a, b) => b.lastModified - a.lastModified);
+
+            const totalPages = Math.ceil(postsWithDates.length / CONFIG.pagination.itemsPerPage);
+            const postListHtml = this.generatePostListHtml(postsWithDates, totalPages);
+
+            // 更新缓存
+            apiHandler.cache.posts = {
+                data: postListHtml,
+                timestamp: now,
+                etag: response.headers.get('ETag'),
+                rateLimit
+            };
+
+            return postListHtml;
+        } catch (error) {
+            if (apiHandler.cache.posts.data) {
+                return apiHandler.cache.posts.data;
+            }
+
+            return this.generateErrorHtml(error);
+        }
+    },
+
+    // 生成文章列表的具体HTML
+    generatePostListHtml(posts, totalPages) {
+        return `
+            <div class="post-list-container">
+                <div class="post-list" id="postList">
+                    ${posts.map((post, index) => `
+                        <div class="post-item" style="display: ${index < CONFIG.pagination.itemsPerPage ? 'block' : 'none'}" data-page="${Math.floor(index / CONFIG.pagination.itemsPerPage) + 1}">
+                            <a href="${post.url}">
+                                <div class="post-title">${post.type === 'pdf' ? '💾' : '📝'} ${post.name.replace('.md', '').replace('.pdf', '')}</div>
+                                <div class="post-date" style="text-align: right;">${post.lastModified ? `📅 ${utils.formatDate(post.lastModified)}` : '❌ 获取时间失败'}</div>
+                            </a>
+                        </div>
+                    `).join('')}
+                </div>
+                <div class="pagination">
+                    <button id="prevPage" onclick="changePage(-1)" disabled>⏮</button>
+                    <span id="pageInfo">1/${totalPages}</span>
+                    <button id="nextPage" onclick="changePage(1)" ${totalPages <= 1 ? 'disabled' : ''}>⏭</button>
+                </div>
+            </div>
+            <script>
+                let currentPage = 1;
+                const totalPages = ${totalPages};
+                
+                function changePage(delta) {
+                    const newPage = currentPage + delta;
+                    if (newPage >= 1 && newPage <= totalPages) {
+                        document.querySelectorAll('.post-item[data-page="'+currentPage+'"]')
+                            .forEach(item => item.style.display = 'none');
+                        
+                        document.querySelectorAll('.post-item[data-page="'+newPage+'"]')
+                            .forEach(item => item.style.display = 'block');
+                        
+                        currentPage = newPage;
+                        
+                        document.getElementById('prevPage').disabled = currentPage === 1;
+                        document.getElementById('nextPage').disabled = currentPage === totalPages;
+                        document.getElementById('pageInfo').textContent = currentPage + '/' + totalPages;
+                    }
+                }
+            </script>
+        `;
+    },
+
+    // 生成错误提示HTML
+    generateErrorHtml(error) {
+        return `
+            <div class="error-message" style="text-align: center; padding: 20px;">
+                <p style="color: var(--text-color-secondary); margin-bottom: 15px; font-size: 1.2em;">
+                    加载文章列表失败
+                </p>
+                <p style="color: var(--text-color-secondary); font-size: 0.9em; margin-bottom: 20px;">
+                    请检查网络连接
+                </p>
+                <p style="color: var(--text-color-secondary); font-size: 0.8em; margin-bottom: 20px;">
+                    错误详情: ${error.name} - ${error.message}
+                </p>
+                <button onclick="window.location.reload()" 
+                    style="padding: 8px 16px; 
+                    background: var(--link-color); 
+                    color: white; 
+                    border: none; 
+                    border-radius: 4px; 
+                    cursor: pointer;
+                    transition: opacity 0.2s;">
+                    重新加载
+                </button>
+            </div>
+        `;
+    }
+};
+
 // 样式定义
 const styles = `
 <style>
+    /* 基础样式 */
+    *, *::before, *::after {
+        box-sizing: border-box;
+    }
+
+    /* 主题变量 */
     :root {
         /* 深色主题变量 */
         --dark-main-bg: #1a1a1a;
@@ -76,7 +426,7 @@ const styles = `
         --dark-blockquote-bg: #2d2d2d;
         --dark-scrollbar-color: #4a4a4a;
         
-        /* 浅色主题变量 - 调整后的颜色 */
+        /* 浅色主题变量 */
         --light-main-bg: #f5f5f5;
         --light-text-color: #2c3e50;
         --light-text-color-secondary: #666666;
@@ -104,16 +454,11 @@ const styles = `
         
         --sidebar-width: 250px;
         --box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
-        --font-sans: 'SF Pro Text', -apple-system, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 
-            'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif;
-        --font-serif: 'Noto Serif SC', 'Source Han Serif SC', 'Source Han Serif', source-han-serif-sc,
-            'PT Serif', 'SongTi SC', 'MicroSoft Yahei', Georgia, serif;
-        --font-mono: 'SF Mono', Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
-    }
-
-    /* 添加过渡效果 */
-    * {
-        transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+        
+        /* 字体变量 */
+        --font-sans: ${CONFIG.fonts.sans};
+        --font-serif: ${CONFIG.fonts.serif};
+        --font-mono: ${CONFIG.fonts.mono};
     }
 
     /* 浅色主题类 */
@@ -129,6 +474,173 @@ const styles = `
         --code-bg: var(--light-code-bg);
         --blockquote-bg: var(--light-blockquote-bg);
         --scrollbar-color: var(--light-scrollbar-color);
+    }
+
+    /* 过渡效果 */
+    * {
+        transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+    }
+
+    /* 基础布局样式 */
+    body {
+        margin: 0;
+        font-family: var(--font-sans);
+        background-color: var(--main-bg-color);
+        color: var(--main-text-color);
+        line-height: 1.6;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+    }
+
+    /* 统一的布局容器样式 */
+    .layout > * {
+        border-radius: 12px;
+        margin: 8px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        overflow: hidden;
+    }
+
+    /* 头部导航栏样式 */
+    .header {
+        background-color: var(--header-bg);
+        border-bottom: 1px solid var(--border-color);
+        padding: 1rem;
+        box-shadow: var(--box-shadow);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        z-index: 10;
+        border-radius: 0 0 12px 12px;
+        margin: 0 8px 8px 8px;
+    }
+
+    /* Markdown 内容样式 */
+    .markdown-body {
+        background-color: var(--content-bg) !important;
+        color: var(--main-text-color) !important;
+        font-size: 17px !important;
+        line-height: 1.8 !important;
+        font-weight: 400 !important;
+        padding: 30px !important;
+        border-radius: 12px !important;
+        border: 1px solid var(--border-color);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    }
+
+    .markdown-body h1, .markdown-body h2, .markdown-body h3,
+    .markdown-body h4, .markdown-body h5, .markdown-body h6 {
+        margin-top: 24px;
+        margin-bottom: 16px;
+        font-weight: 600 !important;
+        line-height: 1.25;
+        border-bottom: 1px solid var(--border-color);
+        padding-bottom: 0.3em;
+    }
+
+    .markdown-body h1 { font-size: 28px !important; }
+    .markdown-body h2 { font-size: 24px !important; }
+    .markdown-body h3 { font-size: 20px !important; }
+    .markdown-body h4 { font-size: 18px !important; }
+    .markdown-body h5, .markdown-body h6 { font-size: 16px !important; }
+
+    /* 代码块样式 */
+    .markdown-body pre {
+        background-color: var(--code-bg) !important;
+        border: 1px solid var(--border-color) !important;
+        padding: 16px;
+        margin: 16px 0;
+        border-radius: 8px;
+        position: relative;
+        padding-top: 2.5em !important;
+    }
+
+    .markdown-body code {
+        font-family: var(--font-mono);
+        font-size: 15px !important;
+        background-color: var(--code-bg) !important;
+        color: var(--main-text-color) !important;
+    }
+
+    /* 目录样式 */
+    .toc {
+        width: var(--sidebar-width);
+        padding: 20px;
+        position: sticky;
+        top: 0;
+        height: 100vh;
+        overflow-y: auto;
+        border-left: 1px solid var(--border-color);
+        background: var(--main-bg-color);
+        scroll-behavior: smooth;
+        border-radius: 12px;
+    }
+
+    .toc-item {
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        padding: 8px 12px;
+        margin: 4px 0;
+        border-radius: 4px;
+        position: relative;
+    }
+
+    /* 移动端适配 */
+    @media (max-width: 768px) {
+        .layout > * {
+            margin: 4px;
+            border-radius: 8px;
+        }
+        
+        .layout {
+            flex-direction: column;
+            gap: 8px;
+            padding: 0 4px;
+        }
+        
+        .header {
+            padding: 10px;
+            margin: 0 4px 4px 4px;
+            border-radius: 0 0 8px 8px;
+        }
+
+        .sidebar {
+            position: static;
+            width: 100%;
+            height: auto;
+            padding: 10px;
+            overflow: visible;
+        }
+
+        .toc {
+            display: none;
+        }
+
+        .content {
+            padding: 15px;
+            width: 100%;
+        }
+
+        .markdown-body {
+            font-size: 16px !important;
+            padding: 15px !important;
+        }
+
+        .post-item {
+            padding: 8px 0;
+        }
+
+        .back-top,
+        .comment-button,
+        .theme-toggle {
+            width: 35px;
+            height: 35px;
+            font-size: 16px;
+            border-radius: 8px;
+        }
+    }
+
+    /* 添加渡效果 */
+    * {
+        transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
     }
 
     /* 主题切换按钮样式 */
@@ -148,12 +660,12 @@ const styles = `
         align-items: center;
         justify-content: center;
         font-size: 20px;
-        transition: background 0.3s;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        transition: opacity 0.3s;
+        opacity: 0.5; /* 添加50%透明度 */
     }
 
     .theme-toggle:hover {
-        opacity: 0.9;
+        opacity: 0.9; /* 悬停时提高透明度 */
     }
 
     @media (max-width: 768px) {
@@ -203,11 +715,18 @@ const styles = `
     }
 
     .header .site-logo {
-        width: 40px;
-        height: 40px;
+        width: 50px;  /* 增加宽度 */
+        height: 50px;  /* 增加高度 */
         border-radius: 50%;
         object-fit: cover;
+        margin-left: 20px;  /* 向右移动 */
+        transition: transform 0.6s ease;  /* 添加过渡效果 */
     }
+
+    .header .site-logo:hover {
+        transform: rotate(360deg);  /* 悬停时旋转360度 */
+    }
+
     .header .header-center {
         position: absolute;
         left: 50%;
@@ -217,6 +736,7 @@ const styles = `
         display: flex;
         gap: 20px;
         margin-right: 20px;
+        align-items: center;
     }
     .header a {
         color: var(--main-text-color);
@@ -231,10 +751,21 @@ const styles = `
         font-size: 1rem;
         opacity: 0.8;
         transition: opacity 0.2s ease;
+        text-decoration: none;
+        color: var(--main-text-color);
     }
     .header .header-right a:hover {
         opacity: 1;
         color: var(--link-color);
+    }
+    .header .header-right a:not(:last-child)::after {
+        content: '|';
+        margin-left: 20px;
+        color: var(--main-text-color); /* 使用主文本颜色 */
+        opacity: 0.5;
+    }
+    .header .header-right a:not(:last-child)::after {
+        margin-left: 20px;
     }
     .layout {
         display: flex;
@@ -261,20 +792,24 @@ const styles = `
         margin: 0;
     }
     .post-item {
-        padding: 12px 0;
-        border-bottom: 1px solid var(--border-color);
-        transition: all 0.2s ease;
+        border-radius: 8px;
+        margin: 8px 0;
+        transition: all 0.3s ease;
+        background: var(--content-bg);  /* 添加背景色 */
+        border: 1px solid var(--border-color);  /* 添加边框 */
+        overflow: hidden;  /* 确保内容不会溢出圆角 */
     }
     .post-item:hover {
-        background-color: var(--hover-bg);
         transform: translateX(4px);
+        background-color: var(--hover-bg);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);  /* 悬停时添加阴影 */
     }
     .post-item a {
+        padding: 16px;  /* 增加内边距 */
+        display: block;
         color: var(--main-text-color);
         text-decoration: none;
-        display: block;
-        padding: 12px;
-        border-radius: 4px;
+        transition: all 0.2s ease;
     }
     .post-title {
         font-size: 1rem;
@@ -330,16 +865,19 @@ const styles = `
         border-radius: 50%;
         font-size: 20px;
         cursor: pointer;
-        opacity: 0;
+        opacity: 0; /* 初始状态为完全透明(隐藏) */
         transition: opacity 0.3s;
         z-index: 100;
     }
+
     .back-top.show {
-        opacity: 1;
+        opacity: 0.5; /* 显示时为50%透明度 */
     }
+
     .back-top:hover {
-        background: #1873cc;
+        opacity: 0.9; /* 悬停时提高透明度 */
     }
+
     @media (max-width: 768px) {
         .back-top {
             right: 15px;
@@ -366,12 +904,51 @@ const styles = `
     .content.markdown-body {
         background-color: var(--content-bg) !important;
         color: var(--main-text-color) !important;
+        padding: 30px !important;
+        border-radius: 12px !important;
+        border: 1px solid var(--border-color);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
     }
     .markdown-body {
         background-color: var(--content-bg) !important;
         color: var(--main-text-color) !important;
-        font-size: 17px !important;  /* 增大基础字体大小 */
+        font-size: 17px !important;  
         line-height: 1.8 !important;
+        font-weight: 400 !important; /* 增加基础字重 */
+        font-family: var(--font-sans) !important;
+    }
+    .markdown-body img {
+        border-radius: 8px;
+        margin: 16px 0;
+    }
+    .markdown-body pre {
+        border-radius: 8px !important;
+        margin: 16px 0 !important;
+        font-family: var(--font-mono) !important;
+    }
+    .markdown-body blockquote {
+        border-radius: 8px;
+        background-color: var(--blockquote-bg) !important;
+        padding: 16px !important;
+        margin: 16px 0 !important;
+        font-family: var(--font-serif) !important;
+    }
+    .markdown-body table {
+        border-radius: 8px;
+        overflow: hidden;  /* 确保表格边角是圆的 */
+        border: 1px solid var(--border-color) !important;
+        margin: 16px 0;
+    }
+    /* 代码块容器圆角 */
+    .markdown-body .highlight {
+        border-radius: 8px;
+        overflow: hidden;
+        margin: 16px 0;
+    }
+    /* 内联代码圆角 */
+    .markdown-body code:not([class*="language-"]) {
+        border-radius: 4px;
+        padding: 2px 6px !important;
     }
     /* 留言板按钮 */
     .comment-button {
@@ -391,11 +968,12 @@ const styles = `
         justify-content: center;
         text-decoration: none;
         font-size: 20px;
-        transition: background 0.3s;
+        transition: opacity 0.3s;
+        opacity: 0.5; /* 添加50%透明度 */
     }
     
     .comment-button:hover {
-        background: #1873cc;
+        opacity: 0.9; /* 悬停时提高透明度 */
     }
     
     @media (max-width: 768px) {
@@ -514,15 +1092,17 @@ const styles = `
     .markdown-body {
         background-color: var(--content-bg) !important;
         color: var(--main-text-color) !important;
-        font-size: 17px !important;  /* 增大基础字体大小 */
+        font-size: 17px !important;  
         line-height: 1.8 !important;
+        font-weight: 400 !important; /* 增加基础字重 */
     }
 
     /* 优化段落和边框 */
     .markdown-body p {
         margin: 16px 0;
         line-height: 1.8;
-        font-size: 17px !important;  /* 增大段落字体大小 */
+        font-size: 17px !important;
+        font-weight: 400 !important; /* 增加段落字重 */
     }
 
     /* 优化标题样式 */
@@ -532,6 +1112,7 @@ const styles = `
         margin-bottom: 16px;
         padding-bottom: 8px;
         border-bottom: 1px solid var(--border-color);
+        font-weight: 600 !important; /* 增加 h1 字重 */
     }
 
     .markdown-body h2 {
@@ -540,6 +1121,7 @@ const styles = `
         margin-bottom: 16px;
         padding-bottom: 8px;
         border-bottom: 1px solid var(--border-color);
+        font-weight: 600 !important; /* 增加 h2 字重 */
     }
 
     .markdown-body h3 {
@@ -548,25 +1130,29 @@ const styles = `
         margin-bottom: 16px;
         padding-bottom: 8px;
         border-bottom: 1px solid var(--border-color);
+        font-weight: 600 !important; /* 增加 h3 字重 */
     }
 
     .markdown-body h4 {
         font-size: 18px !important;
         margin-top: 24px;
         margin-bottom: 16px;
+        font-weight: 600 !important; /* 增加 h4 字重 */
     }
 
     .markdown-body h5, .markdown-body h6 {
         font-size: 16px !important;
         margin-top: 24px;
         margin-bottom: 16px;
+        font-weight: 600 !important; /* 增加 h5/h6 字重 */
     }
 
     /* 优化列表项样式 */
     .markdown-body ul li,
     .markdown-body ol li {
         padding: 4px 0;
-        font-size: 17px !important;  /* 增大列表项体大小 */
+        font-size: 17px !important;
+        font-weight: 400 !important; /* 增加列表项字重 */
         border-bottom: 1px solid var(--border-color);
     }
 
@@ -592,7 +1178,8 @@ const styles = `
         margin: 16px 0;
         color: var(--main-text-color) !important;
         opacity: 0.9;
-        font-size: 17px !important;  /* 增大引用块字体大小 */
+        font-size: 17px !important;
+        font-weight: 400 !important; /* 增加引用块字重 */
     }
 
     /* 优化表格样式 */
@@ -671,6 +1258,8 @@ const styles = `
         border: 2px dashed var(--border-color);
         border-radius: 8px;
         background-color: var(--content-bg);
+        color: var(--main-text-color);
+        opacity: 0.5;
     }
 
     .toc-empty-icon {
@@ -684,32 +1273,16 @@ const styles = `
         color: var(--text-color-secondary);
         font-weight: 500;
     }
-
-    /* 分页相关样式 */
-    .pagination {
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        gap: 10px;
-        padding: 10px;
-        position: fixed;
-        bottom: 0;
-        left: 0;
-        width: var(--sidebar-width);
-        background: var(--main-bg-color);
-        border-top: 1px solid var(--border-color);
-        z-index: 100;
-    }
     
     .pagination button {
-        padding: 6px 12px;
+        padding: 0.375rem 0.75rem;
         border: 1px solid var(--border-color);
         background: var(--content-bg);
         color: var(--main-text-color);
         cursor: pointer;
-        border-radius: 4px;
-        font-size: 14px;
-        min-width: 50px;
+        border-radius: 0.25rem;
+        font-size: 0.875rem;
+        min-width: 3rem;
     }
     
     .pagination button:hover:not(:disabled) {
@@ -723,8 +1296,8 @@ const styles = `
 
     .pagination span {
         color: var(--main-text-color);
-        font-size: 14px;
-        min-width: 80px;
+        font-size: 0.875rem;
+        min-width: 5rem;
         text-align: center;
     }
 
@@ -960,6 +1533,21 @@ const styles = `
         overflow-y: auto;
         border-left: 1px solid var(--border-color);
         background: var(--main-bg-color);
+        scroll-behavior: smooth;
+        scrollbar-gutter: stable;
+        /* 隐藏滚动条但保持功能 */
+        -ms-overflow-style: none;
+        scrollbar-width: none;
+        /* 添加平滑滚动效果 */
+        scroll-snap-type: y proximity;
+        overscroll-behavior: contain;
+        /* 添加滚动动画 */
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    /* 隐藏滚动条 */
+    .toc::-webkit-scrollbar {
+        display: none;
     }
 
     .toc-list {
@@ -969,10 +1557,11 @@ const styles = `
     }
 
     .toc-item {
-        margin: 8px 0;
-        padding: 6px 8px;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        scroll-snap-align: start;
+        padding: 8px 12px;
+        margin: 4px 0;
         border-radius: 4px;
-        transition: all 0.2s ease;
     }
 
     .toc-item:hover {
@@ -996,35 +1585,35 @@ const styles = `
 
     .toc-h2 { 
         padding-left: 1.2rem;
-        font-size: 1.1rem;
+        font-size: 1rem;
         font-weight: 500;
         margin-bottom: 0.6rem;
     }
 
     .toc-h3 { 
         padding-left: 2.4rem;
-        font-size: 1rem;
+        font-size: 0.8rem;
         font-weight: 500;
         margin-bottom: 0.4rem;
     }
 
     .toc-h4 { 
         padding-left: 3.6rem;
-        font-size: 0.95rem;
+        font-size: 0.7rem;
         color: var(--text-color-secondary);
         margin-bottom: 0.4rem;
     }
 
     .toc-h5 { 
         padding-left: 4.8rem;
-        font-size: 0.9rem;
+        font-size: 0.6rem;
         color: var(--text-color-secondary);
         margin-bottom: 0.4rem;
     }
 
     .toc-h6 { 
         padding-left: 6rem;
-        font-size: 0.85rem;
+        font-size: 0.6rem;
         color: var(--text-color-secondary);
         margin-bottom: 0.4rem;
     }
@@ -1128,7 +1717,7 @@ const styles = `
         background: var(--border-color);
         border-radius: 1.5px;
         overflow: hidden;
-        margin-top: 4px;  /* 减小顶部间距 */
+        margin-top: 4px;  /* 减小部间距 */
     }
 
     /* 只在 PC 端主页显示 API 限额信息 */
@@ -1284,14 +1873,485 @@ const styles = `
             display: none;
         }
     }
+
+    /* 目录项激活状态样式 */
+    .toc-item.active {
+        background-color: var(--hover-bg);
+        border-radius: 4px;
+        position: relative;
+        /* 添加过渡效果 */
+        transition: background-color 0.3s ease, transform 0.2s ease;
+    }
+
+    .toc-item.active::before {
+        content: '';
+        position: absolute;
+        left: -20px;
+        top: 50%;
+        transform: translateY(-50%);
+        width: 3px;
+        height: 70%;
+        background-color: var(--link-color);
+        border-radius: 2px;
+    }
+
+    .toc-item.active .toc-link {
+        color: var(--link-color);
+        font-weight: 500;
+    }
+
+    /* 优化目录项过渡效果 */
+    .toc-item {
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        scroll-snap-align: start;
+        padding: 8px 12px;
+        margin: 4px 0;
+        border-radius: 4px;
+    }
+
+    .toc-item::before {
+        content: '';
+        position: absolute;
+        left: -20px;
+        top: 50%;
+        transform: translateY(-50%);
+        width: 5px;
+        height: 0;
+        background-color: var(--link-color);
+        border-radius: 2px;
+        transition: height 0.3s ease;
+    }
+
+    .toc-item:hover::before {
+        height: 70%;
+    }
+
+    /* 布局容器圆角 */
+    .layout > * {
+        border-radius: 12px;
+        margin: 8px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        overflow: hidden;  /* 确保内容不会溢出圆角 */
+    }
+
+    /* 侧边栏圆角 */
+    .sidebar {
+        border-radius: 12px;
+        background: var(--content-bg);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        border: 1px solid var(--border-color);
+    }
+
+    /* 主内容区圆角 */
+    .content {
+        border-radius: 12px;
+        background: var(--content-bg);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        border: 1px solid var(--border-color);
+    }
+
+    /* 目录区域圆角 */
+    .toc {
+        border-radius: 12px;
+        background: var(--content-bg);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        border: 1px solid var(--border-color);
+    }
+
+    /* 头部导航栏圆角 */
+    .header {
+        border-radius: 0 0 12px 12px;
+        margin: 0 8px 8px 8px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        border: 1px solid var(--border-color);
+        border-top: none;
+    }
+
+    /* 调整布局间距 */
+    .layout {
+        gap: 16px;
+        padding: 0 8px;
+    }
+
+    /* 移动端适配 */
+    @media (max-width: 768px) {
+        .layout > * {
+            margin: 4px;
+            border-radius: 8px;
+        }
+        
+        .layout {
+            gap: 8px;
+            padding: 0 4px;
+        }
+        
+        .header {
+            margin: 0 4px 4px 4px;
+            border-radius: 0 0 8px 8px;
+        }
+
+        .post-item {
+            margin: 6px 0;
+            border-radius: 6px;
+        }
+
+        /* 移动端按钮圆角优化 */
+        .back-top,
+        .comment-button,
+        .theme-toggle {
+            border-radius: 8px;
+        }
+    }
+
+    /* 按钮圆角统一处理 */
+    button,
+    .button {
+        border-radius: 8px;
+        overflow: hidden;
+    }
+
+    /* 代码块圆角 */
+    pre {
+        border-radius: 8px !important;
+    }
+
+    /* 图片圆角 */
+    img:not(.site-logo) {
+        border-radius: 8px;
+    }
+
+    /* 引用块圆角 */
+    blockquote {
+        border-radius: 8px;
+    }
+
+    /* 搜索框和输入框圆角 */
+    input,
+    textarea {
+        border-radius: 8px;
+    }
+
+    /* API限额信息圆角 */
+    .api-limit-info {
+        border-radius: 8px;
+    }
+
+    /* 章列表容器样式 */
+    .post-list-container {
+        position: relative;
+        margin-bottom: 20px;  /* 增加底部外边距 */
+    }
+
+    .post-list {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    /* 分页按钮组样式优化 */
+    .pagination {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 0.625rem;
+        position: fixed;
+        bottom: 0;
+        left: 0.9375rem;
+        width: calc(var(--sidebar-width));
+        background: var(--main-bg-color);
+        border-top: 1px solid var(--border-color);
+        z-index: 100;
+        border-radius: 0.5rem 0.5rem 0 0;
+        padding: 0.625rem;
+        backdrop-filter: blur(50px);
+        background-color: rgba(var(--main-bg-color), 0.8);
+    }
+
+    .pagination button {
+        padding: 0.375rem 0.75rem;
+        border: 1px solid var(--border-color);
+        background: var(--content-bg);
+        color: var(--main-text-color);
+        cursor: pointer;
+        border-radius: 0.25rem;
+        font-size: 0.875rem;
+        min-width: 3rem;
+    }
+
+    .pagination button:hover:not(:disabled) {
+        background: var(--hover-bg);
+    }
+
+    .pagination button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    .pagination span {
+        color: var(--main-text-color);
+        font-size: 0.875rem;
+        min-width: 5rem;
+        text-align: center;
+    }
+
+    /* 移动端分页样式适配 */
+    @media (max-width: 48rem) {
+        .pagination {
+            width: 100%;
+            left: 0;
+            padding: 0.5rem;
+            border-radius: 0;
+        }
+
+        .pagination button {
+            padding: 0.25rem 0.5rem;
+            font-size: 0.75rem;
+            min-width: 2.5rem;
+        }
+
+        .pagination span {
+            font-size: 0.75rem;
+            min-width: 4rem;
+        }
+    }
+
+    /* 欢迎诗词样式 - 使用相对单位 */
+    .welcome-poem {
+        text-align: center;
+        padding: 2rem 1.25rem;
+        max-width: 37.5rem;
+        margin: 0 auto;
+    }
+
+    .poem-content {
+        font-size: 1.5rem;
+        line-height: 1.8;
+        margin-bottom: 1.25rem;
+    }
+
+    .poem-author,
+    .poem-title {
+        font-size: 1rem;
+    }
+
+    /* API 限额信息样式 - 使用相对单位 */
+    .api-limit-info {
+        padding: 0.5rem 1rem;
+        font-size: 0.875rem;
+        border-radius: 0.5rem;
+    }
+
+    /* 移动端适配 */
+    @media (max-width: 48rem) {
+        .layout {
+            flex-direction: column;
+            gap: 0.5rem;
+            padding: 0.25rem;
+        }
+
+        .sidebar, .toc {
+            position: static;
+            width: 100%;
+            height: auto;
+            flex: none;
+            padding: 0.75rem;
+        }
+
+        .content {
+            padding: 0.75rem;
+        }
+
+        .header {
+            padding: 0.75rem;
+        }
+
+        .post-item {
+            padding: 0.75rem;
+        }
+
+        .back-top,
+        .comment-button,
+        .theme-toggle {
+            width: 2rem;
+            height: 2rem;
+            font-size: 1rem;
+            right: 0.75rem;
+        }
+
+        .back-top { bottom: 0.75rem; }
+        .comment-button { bottom: 3rem; }
+        .theme-toggle { bottom: 5.25rem; }
+
+        .welcome-poem {
+            padding: 1.5rem 0.75rem;
+        }
+
+        .poem-content {
+            font-size: 1.25rem;
+        }
+
+        .poem-author,
+        .poem-title {
+            font-size: 0.875rem;
+        }
+
+        .code-copy {
+            padding: 0.375rem 0.75rem;
+            font-size: 0.75rem;
+            min-width: 3rem;
+            height: 1.75rem;
+        }
+
+        /* 移动端特定隐藏/显示逻辑 */
+        body.is-home .content { display: none; }
+        body.is-home .sidebar { display: block; }
+        body:not(.is-home) .sidebar { display: none; }
+        body:not(.is-home) .content { display: block; }
+        .toc { display: none; }
+    }
+
+    /* 图片灯箱样式 - 使用相对单位 */
+    .zoom-counter {
+        padding: 0.5rem 1rem;
+        border-radius: 1.25rem;
+        font-size: 0.875rem;
+    }
+
+    /* 响应式图片 */
+    img {
+        max-width: 100%;
+        height: auto;
+    }
+
+    /* 响应式表格 */
+    table {
+        width: 100%;
+        overflow-x: auto;
+        display: block;
+    }
+
+    /* 响应式代码块 */
+    pre {
+        max-width: 100%;
+        overflow-x: auto;
+    }
+
+    /* 解锁模态框样式 */
+    .unlock-modal {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.8); /* 半透明背景 */
+        backdrop-filter: blur(8px); /* 背景模糊效果 */
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+    }
+
+    .unlock-content {
+        background: var(--content-bg);
+        padding: 2.5rem;
+        border-radius: 16px;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+        text-align: center;
+        max-width: 90%;
+        width: 360px;
+        border: 1px solid var(--border-color);
+        animation: modalFadeIn 0.3s ease;
+        display: flex;
+        flex-direction: column;
+        gap: 1.5rem; /* 添加统一的垂直间距 */
+    }
+
+    @keyframes modalFadeIn {
+        from {
+            opacity: 0;
+            transform: translateY(-20px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    .unlock-content h2 {
+        color: var(--main-text-color);
+        font-size: 1.5rem;
+        font-weight: 500;
+        margin: 0; /* 移除默认边距 */
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+    }
+
+    .unlock-content input {
+        width: 100%;
+        padding: 1rem 1.2rem;
+        border: 2px solid var(--border-color);
+        border-radius: 12px;
+        background: var(--main-bg-color);
+        color: var(--main-text-color);
+        font-size: 1rem;
+        outline: none;
+        transition: all 0.3s ease;
+        margin: 0; /* 移除默认边距 */
+    }
+
+    .unlock-content button {
+        width: 100%;
+        padding: 1rem 2rem;
+        border: none;
+        border-radius: 12px;
+        background: var(--link-color);
+        color: white;
+        font-size: 1rem;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        margin: 0; /* 移除默认边距 */
+    }
+
+    #unlock-error {
+        color: #ff4444;
+        font-size: 0.9rem;
+        margin: 0; /* 移除默认边距 */
+        opacity: 0;
+        transform: translateY(-10px);
+        transition: all 0.3s ease;
+        min-height: 1.2em; /* 保持错误信息的位置稳定 */
+    }
+
+    /* 移动端适配 */
+    @media (max-width: 768px) {
+        .unlock-content {
+            padding: 2rem;
+            width: 320px;
+            gap: 1.2rem; /* 移动端稍微减小间距 */
+        }
+        
+        .unlock-content h2 {
+            font-size: 1.3rem;
+        }
+        
+        .unlock-content input {
+            padding: 0.8rem 1rem;
+            font-size: 0.95rem;
+        }
+        
+        .unlock-content button {
+            padding: 0.8rem 1.5rem;
+            font-size: 0.95rem;
+        }
+    }
 </style>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/github-markdown-css@5.2.0/github-markdown.min.css">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;700&display=swap">
-<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/medium-zoom/dist/medium-zoom.min.js"></script>
-<!-- 添加highlight.js -->
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github.min.css">
-<script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
 `;
 
 // HTML模板
@@ -1301,8 +2361,12 @@ const HTML_TEMPLATE = `
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>${CONFIG.title}</title>
-    <link rel="icon" href="${CONFIG.favicon}" type="image/jpeg">
+    <title>${CONFIG.site.title}</title>
+    <link rel="icon" href="${CONFIG.site.favicon}" type="image/jpeg">
+    <!-- 添加字体链接 -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lxgw-wenkai-webfont@1.1.0/style.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lxgw-wenkai-mono-webfont@1.1.0/style.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/jetbrains-mono@4.5.4/index.css" />
     ${styles}
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/github-markdown-css@5.2.0/github-markdown.min.css">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;700&display=swap">
@@ -1330,7 +2394,7 @@ const HTML_TEMPLATE = `
         function updateThemeIcon(theme) {
             const themeButton = document.querySelector('.theme-toggle');
             if (themeButton) {
-                themeButton.innerHTML = theme === 'dark' ? '🔆' : '🌟';
+                themeButton.innerHTML = theme === 'dark' ? '🍅' : '🍉';
                 themeButton.setAttribute('aria-label', theme === 'dark' ? '切换到浅色模式' : '切换到深色模式');
             }
         }
@@ -1345,7 +2409,7 @@ const HTML_TEMPLATE = `
                 contentDiv.removeAttribute('data-markdown');
                 contentDiv.innerHTML = marked.parse(markdown);
 
-                // 初始化图片灯箱
+                // 始化图片灯箱
                 const zoom = mediumZoom('img:not(.site-logo)', {
                     margin: 24,
                     background: getComputedStyle(document.documentElement)
@@ -1353,7 +2417,7 @@ const HTML_TEMPLATE = `
                     scrollOffset: 0,
                 });
 
-                // 添加缩放提示
+                // 添加缩提示
                 const zoomCounter = document.createElement('div');
                 zoomCounter.className = 'zoom-counter';
                 document.body.appendChild(zoomCounter);
@@ -1380,6 +2444,9 @@ const HTML_TEMPLATE = `
                     const tocList = document.createElement('ul');
                     tocList.className = 'toc-list';
                     
+                    // 创建标题ID到目录项的映射
+                    const tocItemsMap = new Map();
+                    
                     headings.forEach(function(heading, index) {
                         heading.id = 'heading-' + index;
                         
@@ -1398,6 +2465,9 @@ const HTML_TEMPLATE = `
                         
                         li.appendChild(a);
                         tocList.appendChild(li);
+                        
+                        // 存储映射关系
+                        tocItemsMap.set(heading.id, li);
                     });
                     
                     const tocDiv = document.querySelector('.toc');
@@ -1405,6 +2475,94 @@ const HTML_TEMPLATE = `
                         tocDiv.innerHTML = '';
                         tocDiv.appendChild(tocList);
                     }
+
+                    // 创建并配置 IntersectionObserver
+                    const observerOptions = {
+                        root: null,
+                        rootMargin: '0px',
+                        threshold: Array.from({length: 100}, (_, i) => i / 100)
+                    };
+
+                    const observer = new IntersectionObserver((entries) => {
+                        // 获取所有标题元素的位置信息
+                        const headingPositions = Array.from(headings).map(heading => {
+                            const { top } = heading.getBoundingClientRect();
+                            return {
+                                id: heading.id,
+                                top: top,
+                                element: heading
+                            };
+                        });
+
+                        // 获取视口高度和滚动位置
+                        const viewportHeight = window.innerHeight;
+                        const scrollTop = window.scrollY;
+                        
+                        // 找到当前应该激活的标题
+                        let activeHeadingId = null;
+                        
+                        // 遍历所有标题位置
+                        for (let i = 0; i < headingPositions.length; i++) {
+                            const current = headingPositions[i];
+                            const next = headingPositions[i + 1];
+                            
+                            // 计算当前标题的内容区域
+                            const contentTop = current.top + scrollTop;
+                            const contentBottom = next ? next.top + scrollTop : document.documentElement.scrollHeight;
+                            
+                            // 检查视口是否在这个内容区域内
+                            if (scrollTop >= contentTop - viewportHeight/3 && 
+                                scrollTop < contentBottom - viewportHeight/3) {
+                                activeHeadingId = current.id;
+                                break;
+                            }
+                        }
+
+                        // 如果没有找到活动标题，而且页面滚动到底部，激活最后一个标题
+                        if (!activeHeadingId && 
+                            scrollTop + viewportHeight > document.documentElement.scrollHeight - 50) {
+                            activeHeadingId = headingPositions[headingPositions.length - 1]?.id;
+                        }
+
+                        // 如果没有找到活动标题，并且页面在顶部，激活第一个标题
+                        if (!activeHeadingId && scrollTop < viewportHeight/2) {
+                            activeHeadingId = headingPositions[0]?.id;
+                        }
+
+                        // 更新目录激活状态
+                        if (activeHeadingId) {
+                            // 移除所有激活状态
+                            document.querySelectorAll('.toc-item').forEach(item => {
+                                item.classList.remove('active');
+                            });
+
+                            // 激活当前项
+                            const tocItem = tocItemsMap.get(activeHeadingId);
+                            if (tocItem) {
+                                tocItem.classList.add('active');
+                                
+                                // 平滑滚动目录
+                                const tocContainer = document.querySelector('.toc');
+                                if (tocContainer) {
+                                    const tocRect = tocContainer.getBoundingClientRect();
+                                    const itemRect = tocItem.getBoundingClientRect();
+                                    
+                                    const targetScroll = tocContainer.scrollTop + 
+                                        (itemRect.top - tocRect.top) - 
+                                        (tocRect.height / 2) + 
+                                        (itemRect.height / 2);
+                                    
+                                    tocContainer.scrollTo({
+                                        top: targetScroll,
+                                        behavior: 'smooth'
+                                    });
+                                }
+                            }
+                        }
+                    }, observerOptions);
+
+                    // 观察所有标题元素
+                    headings.forEach(heading => observer.observe(heading));
                 } else {
                     const tocDiv = document.querySelector('.toc');
                     if (tocDiv) {
@@ -1499,12 +2657,13 @@ const HTML_TEMPLATE = `
 <body class="{{page_class}}">
     <header class="header">
         <a href="https://github.com/1143520/git-blog" target="_blank" rel="noopener noreferrer">
-    <img src="${CONFIG.favicon}" alt="站点图标" class="site-logo">
-</a>
+            <img src="${CONFIG.site.favicon}" alt="站点图标" class="site-logo">
+        </a>
         <div class="header-center">
-            <a href="/">${CONFIG.title}</a>
+            <a href="/">${CONFIG.site.title}</a>
         </div>
         <div class="header-right">
+            <a href="https://www.nodeseek.com/space/9191#/general" target="_blank" rel="noopener noreferrer">Nodeseek</a>
             <a href="https://manji.1143520.xyz/" target="_blank" rel="noopener noreferrer">漫记</a>
             <a href="https://home.1143520.xyz/" target="_blank" rel="noopener noreferrer">主页</a>
         </div>
@@ -1520,442 +2679,297 @@ const HTML_TEMPLATE = `
             {{toc}}
         </aside>
     </div>
-    <button class="back-top" aria-label="返回顶部">🏠</button>
-    <a href="https://liuyan.1143520.xyz/" target="_blank" class="comment-button" aria-label="留言板" rel="noopener noreferrer">📋</a>
-    <button class="theme-toggle" onclick="toggleTheme()" aria-label="切换主题">🔅</button>
+    <button class="back-top" aria-label="返回顶部">🌵</button>
+    <a href="https://liuyan.1143520.xyz/" target="_blank" class="comment-button" aria-label="留言板" rel="noopener noreferrer">🥝</a>
+    <button class="theme-toggle" onclick="toggleTheme()" aria-label="切换主题">🍅</button>
     {{api_limit_info}}
 </body>
 </html>
 `;
 
-// 添加缓存相关量
-const CACHE_TIME = 0; // 设置缓存时间为0，即不使用缓存
-let postsCache = {
-    data: null,
-    timestamp: 0
-};
-
-// 格式化日期函数
-function formatDate(date) {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-}
-
-// 将UTC时间戳转换为北京时间
-function convertToBeiJingTime(timestamp) {
-    const utcDate = new Date(Number(timestamp) * 1000);
-    const beijingDate = new Date(utcDate.getTime() + 8 * 60 * 60 * 1000);
-    return beijingDate;
-}
-
-// 生成 API 限额信息的 HTML
-function generateApiLimitHtml(rateLimit) {
-    const used = parseInt(rateLimit.used) || 0;
-    const limit = parseInt(rateLimit.limit) || 1;
-    const remaining = parseInt(rateLimit.remaining) || 0;
-    const resetTime = convertToBeiJingTime(rateLimit.reset);
-    
-    return `
-        <div class="api-limit-info">
-            <p>API 限额: ${remaining} / ${limit}</p>
-            <p>已使用: ${used}</p>
-            <p>重置时间: ${resetTime.toLocaleTimeString('zh-CN', { hour12: false })}</p>
-            <div class="progress-bar">
-                <div class="progress-bar-fill" style="width: ${(used / limit) * 100}%"></div>
-            </div>
-        </div>
-    `;
-}
-
-// 修改 fetchWithRetry 函数
-async function fetchWithRetry(url, options, env, maxRetries = 3) {
-    const delays = [1000, 2000, 4000];
-    let lastError;
-
-    // 添加 GitHub token 到请求头
-    const headers = {
-        'User-Agent': 'CloudflareWorker',
-        'Accept': 'application/vnd.github.v3+json',
-        ...(options.headers || {}),
-    };
-    
-    if (env.GITHUB_TOKEN) {
-        headers.Authorization = `Bearer ${env.GITHUB_TOKEN}`;
-    }
-
-    for (let i = 0; i < maxRetries; i++) {
-        try {
-            const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), 8000);
-            
-            const response = await fetch(url, {
-                ...options,
-                headers,
-                signal: controller.signal
-            });
-            
-            clearTimeout(timeout);
-            
-            // 获取 API 限制信息
-            const rateLimit = {
-                limit: response.headers.get('X-RateLimit-Limit'),
-                remaining: response.headers.get('X-RateLimit-Remaining'),
-                reset: response.headers.get('X-RateLimit-Reset'),
-                used: response.headers.get('X-RateLimit-Used')
-            };
-            
-            if (response.status === 403 && rateLimit.remaining === '0') {
-                const resetDate = convertToBeiJingTime(rateLimit.reset);
-                throw new Error(`API 限制已达上限（${rateLimit.limit}次/小时），将在 ${resetDate.toLocaleString('zh-CN', { hour12: false })} 重置`);
-            }
-            
-            if (!response.ok) {
-                const responseText = await response.text();
-                throw new Error(`HTTP error! status: ${response.status}, body: ${responseText}`);
-            }
-            
-            return { response, rateLimit };  // 返回响应和限额信息
-        } catch (error) {
-            lastError = error;
-            if (i === maxRetries - 1) break;
-            
-            if (error.name === 'AbortError' || error.name === 'TypeError') {
-                await new Promise(resolve => setTimeout(resolve, delays[i]));
-                continue;
-            }
-            
-            throw error;
-        }
-    }
-    
-    throw lastError;
-}
-
-// 修改 generatePostList 函数
-async function generatePostList(env) {
-    try {
-        const now = Date.now();
-        if (postsCache.data && (now - postsCache.timestamp) < CACHE_TIME) {
-            return postsCache.data;
-        }
-
-        const apiUrl = `https://api.github.com/repos/${env.GITHUB_OWNER}/${env.GITHUB_REPO}/contents/`;
-        
-        const { response, rateLimit } = await fetchWithRetry(apiUrl, {
-            headers: {
-                'If-None-Match': postsCache.etag || ''
-            }
-        }, env);
-
-        if (response.status === 304 && postsCache.data) {
-            postsCache.timestamp = now;
-            return postsCache.data;
-        }
-
-        const files = await response.json();
-        const posts = files
-            .filter(file => file.name.endsWith('.md') && file.name !== 'README.md')
-            .map(file => ({
-                name: file.name,
-                path: file.path,
-                url: `/posts/${file.name}`,
-                sha: file.sha
-            }));
-
-        const postsWithDates = await Promise.all(posts.map(async post => {
-            try {
-                const { response: commitResponse } = await fetchWithRetry(
-                    `https://api.github.com/repos/${env.GITHUB_OWNER}/${env.GITHUB_REPO}/commits?path=${post.path}&page=1&per_page=1`,
-                    {},
-                    env
-                );
-                
-                const commits = await commitResponse.json();
-                if (commits && commits.length > 0) {
-                    const lastCommit = commits[0];
-                    post.lastModified = new Date(lastCommit.commit.committer.date);
-                }
-            } catch (error) {
-                console.error(`Error fetching commit info for ${post.path}:`, error);
-                post.lastModified = new Date();
-            }
-            return post;
-        }));
-
-        postsWithDates.sort((a, b) => b.lastModified - a.lastModified);
-
-        const ITEMS_PER_PAGE = 6;
-        const totalPages = Math.ceil(postsWithDates.length / ITEMS_PER_PAGE);
-
-        const postListHtml = `
-            <div class="post-list-container">
-                <div class="post-list" id="postList">
-                    ${postsWithDates.map((post, index) => `
-                        <div class="post-item" style="display: ${index < ITEMS_PER_PAGE ? 'block' : 'none'}" data-page="${Math.floor(index / ITEMS_PER_PAGE) + 1}">
-                            <a href="${post.url}">
-                                <div class="post-title">📝 ${post.name.replace('.md', '')}</div>
-                                <div class="post-date" style="text-align: right;">📅 ${post.lastModified ? formatDate(post.lastModified) : ''}</div>
-                            </a>
-                        </div>
-                    `).join('')}
-                </div>
-                <div class="pagination">
-                    <button id="prevPage" onclick="changePage(-1)" disabled>上一页</button>
-                    <span id="pageInfo">1/${totalPages}</span>
-                    <button id="nextPage" onclick="changePage(1)" ${totalPages <= 1 ? 'disabled' : ''}>下一页</button>
-                </div>
-            </div>
-            <script>
-                let currentPage = 1;
-                const totalPages = ${totalPages};
-                
-                function changePage(delta) {
-                    const newPage = currentPage + delta;
-                    if (newPage >= 1 && newPage <= totalPages) {
-                        document.querySelectorAll('.post-item[data-page="'+currentPage+'"]')
-                            .forEach(item => item.style.display = 'none');
-                        
-                        document.querySelectorAll('.post-item[data-page="'+newPage+'"]')
-                            .forEach(item => item.style.display = 'block');
-                        
-                        currentPage = newPage;
-                        
-                        document.getElementById('prevPage').disabled = currentPage === 1;
-                        document.getElementById('nextPage').disabled = currentPage === totalPages;
-                        document.getElementById('pageInfo').textContent = currentPage + '/' + totalPages;
-                    }
-                }
-            </script>
-        `;
-
-        // 更新缓存
-        const html = {
-            data: postListHtml,
-            timestamp: now,
-            etag: response.headers.get('ETag'),
-            rateLimit  // 保存 API 限额信息到缓存
-        };
-        postsCache = html;
-
-        return postListHtml;
-    } catch (error) {
-        if (postsCache.data) {
-            return postsCache.data;
-        }
-
-        return `
-            <div class="error-message" style="text-align: center; padding: 20px;">
-                <p style="color: var(--text-color-secondary); margin-bottom: 15px; font-size: 1.2em;">
-                    加载文章列表失败
-                </p>
-                <p style="color: var(--text-color-secondary); font-size: 0.9em; margin-bottom: 20px;">
-                    请检查网络连接
-                </p>
-                <p style="color: var(--text-color-secondary); font-size: 0.8em; margin-bottom: 20px;">
-                    错误详情: ${error.name} - ${error.message}
-                </p>
-                <button onclick="window.location.reload()" 
-                    style="padding: 8px 16px; 
-                    background: var(--link-color); 
-                    color: white; 
-                    border: none; 
-                    border-radius: 4px; 
-                    cursor: pointer;
-                    transition: opacity 0.2s;">
-                    重新加载
-                </button>
-            </div>
-        `;
-    }
-}
-
-async function getPostContent(path, env) {
-    const response = await fetch(
-        `https://raw.githubusercontent.com/${env.GITHUB_OWNER}/${env.GITHUB_REPO}/main/${path}`,
-        {
-            headers: {
-                'Authorization': `Bearer ${env.GITHUB_TOKEN}`,
-                'User-Agent': 'CloudflareWorker'
-            }
-        }
-    );
-
-    if (!response.ok) {
-        throw new Error('Failed to fetch post content');
-    }
-
-    return await response.text();
-}
-
-// 主要处理逻辑
+// 主处理模块
 export default {
     async fetch(request, env) {
         try {
             const url = new URL(request.url);
             const path = url.pathname;
-            
-            const postList = await generatePostList(env);
+
+            const postList = await htmlGenerator.generatePostList(env);
             let pageClass = '';
-            
-            // 根据配置决定是否启用密码验证
-            const unlockModalHtml = CONFIG.enablePasswordProtection ? `
-                <div id="unlock-modal" class="unlock-modal">
-                    <div class="unlock-content">
-                        <h2>🔐 请输入访问密码</h2>
-                        <input type="password" id="password-input" placeholder="请输入密码">
-                        <button onclick="verifyPassword('${env.ADMIN_PASSWORD}')">解锁</button>
-                        <p id="unlock-error" style="color: #ff4444; display: none;">密码错误，请重试</p>
-                    </div>
-                </div>
-                <div id="main-content" style="display: none;">
-            ` : '<div id="main-content">';
 
-            const unlockScriptHtml = CONFIG.enablePasswordProtection ? `
-                <style>
-                    .unlock-modal {
-                        position: fixed;
-                        top: 0;
-                        left: 0;
-                        width: 100%;
-                        height: 100%;
-                        background: rgba(0, 0, 0, 0.8);
-                        display: flex;
-                        justify-content: center;
-                        align-items: center;
-                        z-index: 1000;
-                    }
-                    .unlock-content {
-                        background: var(--content-bg);
-                        padding: 2rem;
-                        border-radius: 8px;
-                        text-align: center;
-                        box-shadow: 0 0 20px rgba(0, 0, 0, 0.3);
-                    }
-                    .unlock-content h2 {
-                        margin-bottom: 1.5rem;
-                        color: var(--main-text-color);
-                    }
-                    .unlock-content input {
-                        width: 200px;
-                        padding: 8px 12px;
-                        margin-bottom: 1rem;
-                        border: 1px solid var(--border-color);
-                        border-radius: 4px;
-                        background: var(--main-bg-color);
-                        color: var(--main-text-color);
-                    }
-                    .unlock-content button {
-                        padding: 8px 24px;
-                        background: var(--link-color);
-                        color: white;
-                        border: none;
-                        border-radius: 4px;
-                        cursor: pointer;
-                        transition: opacity 0.2s;
-                    }
-                    .unlock-content button:hover {
-                        opacity: 0.9;
-                    }
-                </style>
-                <script>
-                    function checkUnlock() {
-                        const unlockTime = localStorage.getItem('unlockTime');
-                        const storedPasswordVersion = localStorage.getItem('passwordVersion');
-                        const currentPasswordVersion = new Date().toISOString().split('T')[0];
-                        const now = new Date().getTime();
-                        
-                        if (unlockTime && 
-                            storedPasswordVersion === currentPasswordVersion && 
-                            (now - parseInt(unlockTime)) < 30 * 24 * 60 * 60 * 1000) {
-                            document.getElementById('unlock-modal').style.display = 'none';
-                            document.getElementById('main-content').style.display = 'block';
-                        } else {
-                            localStorage.removeItem('unlockTime');
-                            localStorage.removeItem('passwordVersion');
-                        }
-                    }
-
-                    function verifyPassword(correctPassword) {
-                        const input = document.getElementById('password-input');
-                        const error = document.getElementById('unlock-error');
-                        
-                        if (input.value === correctPassword) {
-                            const currentPasswordVersion = new Date().toISOString().split('T')[0];
-                            localStorage.setItem('unlockTime', new Date().getTime());
-                            localStorage.setItem('passwordVersion', currentPasswordVersion);
-                            document.getElementById('unlock-modal').style.display = 'none';
-                            document.getElementById('main-content').style.display = 'block';
-                            error.style.display = 'none';
-                        } else {
-                            error.style.display = 'block';
-                            input.value = '';
-                        }
-                    }
-
-                    document.getElementById('password-input').addEventListener('keypress', function(e) {
-                        if (e.key === 'Enter') {
-                            verifyPassword('${env.ADMIN_PASSWORD}');
-                        }
-                    });
-
-                    checkUnlock();
-                </script>
-                </div>
-            ` : '</div>';
-
+            // 根据路径处理不同的请求
             if (path === '/' || path === '/posts') {
-                pageClass = 'is-home';
-                const randomPoem = POEMS[Math.floor(Math.random() * POEMS.length)];
-                const welcomeContent = `
-                    <div style="text-align: center;">
-                        <h1 style="margin-bottom: 40px; color: var(--main-text-color);">欢迎访问我的博客🥝🍇🍅🥥🍉🎩💾📀🔭</h1>
-                    </div>
-                    <div class="welcome-poem">
-                        <div class="poem-content">${randomPoem.content}</div>
-                        <div class="poem-author">—— ${randomPoem.author}</div>
-                        <div class="poem-title">《${randomPoem.title}》</div>
-                    </div>
-                `;
-
-                let html = HTML_TEMPLATE
-                    .replace('{{page_class}}', pageClass)
-                    .replace('{{post_list}}', postList)
-                    .replace('{{content}}', unlockModalHtml + welcomeContent + unlockScriptHtml)
-                    .replace('{{toc}}', `
-                        <div class="toc-empty" style="height: auto; min-height: 150px; padding: 2rem; margin: 1rem;">
-                            <div class="toc-empty-icon" style="font-size: 7rem; margin-bottom: 1rem; color: var(--text-color-secondary);">📑</div>
-                            <div class="toc-empty-text" style="font-size: 1.4rem; color: var(--text-color-secondary); font-weight: 500;">暂无目录</div>
-                        </div>
-                    `)
-                    .replace('{{api_limit_info}}', postsCache.rateLimit ? generateApiLimitHtml(postsCache.rateLimit) : '');
-
-                return new Response(html, {
-                    headers: { 'Content-Type': 'text/html;charset=UTF-8' }
-                });
-            }
-
-            if (path.startsWith('/posts/')) {
-                pageClass = 'is-post';
-                const postPath = path.replace('/posts/', '');
-                const content = await getPostContent(postPath, env);
-                
-                let html = HTML_TEMPLATE
-                    .replace('{{page_class}}', pageClass)
-                    .replace('{{post_list}}', postList)
-                    .replace('{{content}}', unlockModalHtml + `<div id="content" data-markdown="${encodeURIComponent(content)}"></div>` + unlockScriptHtml)
-                    .replace('{{toc}}', '')
-                    .replace('{{api_limit_info}}', '');
-
-                return new Response(html, {
-                    headers: { 'Content-Type': 'text/html;charset=UTF-8' }
-                });
+                return await this.handleHomePage(postList, env);
+            } else if (path.startsWith('/posts/')) {
+                return await this.handlePostPage(path, postList, env, request);
+            } else if (path.startsWith('/pdf-proxy/')) {
+                return await this.handlePdfProxy(path, env);
             }
 
             return new Response('Not Found', { status: 404 });
         } catch (error) {
             return new Response('Error: ' + error.message, { status: 500 });
         }
+    },
+
+    // 处理主页请求
+    async handleHomePage(postList, env) {
+        const pageClass = 'is-home';
+        const randomPoem = utils.getRandomPoem();
+        const welcomeContent = `
+            <div style="text-align: center;">
+                <h1 style="margin-bottom: 40px; color: var(--main-text-color);">欢迎访问我的博客🥝🍇🍅🥥🍉🎩💾📀🔭</h1>
+            </div>
+            <div class="welcome-poem">
+                <div class="poem-content">${randomPoem.content}</div>
+                <div class="poem-author">—— ${randomPoem.author}</div>
+                <div class="poem-title">《${randomPoem.title}》</div>
+            </div>
+        `;
+
+        const html = HTML_TEMPLATE
+            .replace('{{page_class}}', pageClass)
+            .replace('{{post_list}}', postList)
+            .replace('{{content}}', this.wrapWithPasswordProtection(welcomeContent, env))
+            .replace('{{toc}}', this.generateEmptyToc())
+            .replace('{{api_limit_info}}', apiHandler.cache.posts.rateLimit ?
+                htmlGenerator.generateApiLimitHtml(apiHandler.cache.posts.rateLimit) : '');
+
+        return new Response(html, {
+            headers: { 'Content-Type': 'text/html;charset=UTF-8' }
+        });
+    },
+
+    // 处理文章页面请求
+    async handlePostPage(path, postList, env, request) {
+        const pageClass = 'is-post';
+        const postPath = path.replace('/posts/', '');
+
+        if (postPath.endsWith('.pdf')) {
+            return await this.handlePdfPage(postPath, postList, env, request);
+        } else {
+            return await this.handleMarkdownPage(postPath, postList, env);
+        }
+    },
+
+    // 处理PDF页面
+    async handlePdfPage(postPath, postList, env, request) {
+        const response = await fetch(
+            `https://raw.githubusercontent.com/${env.GITHUB_OWNER}/${env.GITHUB_REPO}/main/${postPath}`,
+            {
+                headers: {
+                    'Authorization': `Bearer ${env.GITHUB_TOKEN}`,
+                    'User-Agent': 'CloudflareWorker'
+                }
+            }
+        );
+
+        if (!response.ok) {
+            throw new Error(`Failed to fetch PDF: ${response.status} ${response.statusText}`);
+        }
+
+        const currentUrl = new URL(request.url);
+        const proxyUrl = `${currentUrl.protocol}//${currentUrl.host}/pdf-proxy/${postPath}`;
+        const pdfViewerHtml = this.generatePdfViewerHtml(proxyUrl);
+
+        const html = HTML_TEMPLATE
+            .replace('{{page_class}}', 'is-post')
+            .replace('{{post_list}}', postList)
+            .replace('{{content}}', this.wrapWithPasswordProtection(pdfViewerHtml, env))
+            .replace('{{toc}}', this.generateEmptyToc())
+            .replace('{{api_limit_info}}', '');
+
+        return new Response(html, {
+            headers: { 'Content-Type': 'text/html;charset=UTF-8' }
+        });
+    },
+
+    // 处理Markdown页面
+    async handleMarkdownPage(postPath, postList, env) {
+        const content = await apiHandler.getPostContent(postPath, env);
+        const html = HTML_TEMPLATE
+            .replace('{{page_class}}', 'is-post')
+            .replace('{{post_list}}', postList)
+            .replace('{{content}}', this.wrapWithPasswordProtection(
+                `<div id="content" data-markdown="${encodeURIComponent(content)}"></div>`,
+                env
+            ))
+            .replace('{{toc}}', this.generateEmptyToc())
+            .replace('{{api_limit_info}}', '');
+
+        return new Response(html, {
+            headers: { 'Content-Type': 'text/html;charset=UTF-8' }
+        });
+    },
+
+    // 处理PDF代理请求
+    async handlePdfProxy(path, env) {
+        const pdfPath = path.replace('/pdf-proxy/', '');
+        const response = await fetch(
+            `https://raw.githubusercontent.com/${env.GITHUB_OWNER}/${env.GITHUB_REPO}/main/${pdfPath}`,
+            {
+                headers: {
+                    'Authorization': `Bearer ${env.GITHUB_TOKEN}`,
+                    'User-Agent': 'CloudflareWorker'
+                }
+            }
+        );
+
+        if (!response.ok) {
+            return new Response('PDF not found', { status: 404 });
+        }
+
+        const pdfContent = await response.arrayBuffer();
+
+        return new Response(pdfContent, {
+            headers: {
+                'Content-Type': 'application/pdf',
+                'Content-Disposition': `inline; filename="${pdfPath.split('/').pop()}"`,
+                'Access-Control-Allow-Origin': '*',
+                'Cache-Control': 'public, max-age=3600',
+                'Vary': 'Origin'
+            }
+        });
+    },
+
+    // 生成空目录HTML
+    generateEmptyToc() {
+        return `
+            <div class="toc-empty" style="height: auto; min-height: 150px; padding: 2rem; margin: 1rem;">
+                <div class="toc-empty-icon" style="font-size: 7rem; margin-bottom: 1rem; color: var(--text-color-secondary);">📑</div>
+                <div class="toc-empty-text" style="font-size: 1.4rem; color: var(--text-color-secondary); font-weight: 500;">暂无目录</div>
+            </div>
+        `;
+    },
+
+    // 生成PDF查看器HTML
+    generatePdfViewerHtml(proxyUrl) {
+        return `
+            <div style="width: 100%; height: 100vh; display: flex; flex-direction: column;">
+                <div style="padding: 10px; text-align: center; background: var(--header-bg); border-bottom: 1px solid var(--border-color);">
+                    <a href="${proxyUrl}" 
+                       target="_blank" 
+                       style="color: var(--link-color); text-decoration: none; padding: 8px 16px; display: inline-block;">
+                        📥 下载 PDF
+                    </a>
+                    <button id="toggleViewer" 
+                            style="color: var(--link-color); text-decoration: none; background: none; border: none; cursor: pointer; padding: 8px 16px;">
+                        🔄 切换查看模式
+                    </button>
+                </div>
+                <div style="flex: 1; display: flex; flex-direction: column; position: relative;">
+                    <iframe
+                        src="https://mozilla.github.io/pdf.js/web/viewer.html?file=${encodeURIComponent(proxyUrl)}"
+                        style="width: 100%; flex: 1; border: none;"
+                        allowfullscreen
+                        id="pdfViewer"
+                    ></iframe>
+                    <embed
+                        src="${proxyUrl}#toolbar=0"
+                        type="application/pdf"
+                        style="width: 100%; height: 100%; position: absolute; top: 0; left: 0; display: none;"
+                        id="pdfFallback"
+                    />
+                </div>
+            </div>
+            <script>
+                let usingPdfJs = true;
+                const toggleViewer = document.getElementById('toggleViewer');
+                const pdfViewer = document.getElementById('pdfViewer');
+                const pdfFallback = document.getElementById('pdfFallback');
+
+                toggleViewer.addEventListener('click', () => {
+                    if (usingPdfJs) {
+                        pdfViewer.style.display = 'none';
+                        pdfFallback.style.display = 'block';
+                        toggleViewer.textContent = '🔄 切换到 PDF.js';
+                    } else {
+                        pdfViewer.style.display = 'block';
+                        pdfFallback.style.display = 'none';
+                        toggleViewer.textContent = '🔄 切换到原生查看器';
+                    }
+                    usingPdfJs = !usingPdfJs;
+                });
+
+                window.addEventListener('error', function(e) {
+                    if (e.target.id === 'pdfViewer') {
+                        pdfViewer.style.display = 'none';
+                        pdfFallback.style.display = 'block';
+                        toggleViewer.textContent = '🔄 切换到 PDF.js';
+                        usingPdfJs = false;
+                    }
+                }, true);
+            </script>
+        `;
+    },
+
+    // 密码保护包装
+    wrapWithPasswordProtection(content, env) {
+        if (!CONFIG.site.enablePasswordProtection) {
+            return content;
+        }
+
+        return `
+            <div id="unlock-modal" class="unlock-modal">
+                <div class="unlock-content">
+                    <h2>请输入访问密码</h2>
+                    <input type="password" 
+                           id="password-input" 
+                           placeholder="请输入密码" 
+                           autocomplete="off"
+                           spellcheck="false">
+                    <button onclick="verifyPassword('${env.ADMIN_PASSWORD}')">🔐解锁访问</button>
+                    <p id="unlock-error"></p>
+                </div>
+            </div>
+            <div id="main-content" style="display: none;">
+                ${content}
+            </div>
+            <script>
+                function checkUnlock() {
+                    const unlockTime = localStorage.getItem('unlockTime');
+                    const storedPasswordVersion = localStorage.getItem('passwordVersion');
+                    const currentPasswordVersion = new Date().toISOString().split('T')[0];
+                    const now = new Date().getTime();
+                    
+                    if (unlockTime && 
+                        storedPasswordVersion === currentPasswordVersion && 
+                        (now - parseInt(unlockTime)) < 30 * 24 * 60 * 60 * 1000) {
+                        document.getElementById('unlock-modal').style.display = 'none';
+                        document.getElementById('main-content').style.display = 'block';
+                    } else {
+                        localStorage.removeItem('unlockTime');
+                        localStorage.removeItem('passwordVersion');
+                    }
+                }
+
+                function verifyPassword(correctPassword) {
+                    const input = document.getElementById('password-input');
+                    const error = document.getElementById('unlock-error');
+                    
+                    if (input.value === correctPassword) {
+                        const currentPasswordVersion = new Date().toISOString().split('T')[0];
+                        localStorage.setItem('unlockTime', new Date().getTime());
+                        localStorage.setItem('passwordVersion', currentPasswordVersion);
+                        document.getElementById('unlock-modal').style.display = 'none';
+                        document.getElementById('main-content').style.display = 'block';
+                        error.classList.remove('show');
+                    } else {
+                        error.textContent = '密码错误，请重试';
+                        error.classList.add('show');
+                        input.value = '';
+                        input.focus();
+                    }
+                }
+
+                document.getElementById('password-input').addEventListener('keypress', function(e) {
+                    if (e.key === 'Enter') {
+                        verifyPassword('${env.ADMIN_PASSWORD}');
+                    }
+                });
+
+                checkUnlock();
+            </script>
+        `;
     }
 }; 
