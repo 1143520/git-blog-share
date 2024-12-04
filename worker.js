@@ -2,7 +2,7 @@
 const CONFIG = {
     // 基础配置
     site: {
-        title: '🕮 BAOER の BLOG 🕮',
+        title: '🍹 BAOER の BLOG 🍍',
         favicon: 'https://pic.wtr.cc/i/2024/11/29/6749922b0967c.jpeg',
         enablePasswordProtection: true,
     },
@@ -2663,9 +2663,9 @@ const HTML_TEMPLATE = `
             <a href="/">${CONFIG.site.title}</a>
         </div>
         <div class="header-right">
-            <a href="https://www.nodeseek.com/space/9191#/general" target="_blank" rel="noopener noreferrer">Nodeseek</a>
-            <a href="https://manji.1143520.xyz/" target="_blank" rel="noopener noreferrer">漫记</a>
-            <a href="https://home.1143520.xyz/" target="_blank" rel="noopener noreferrer">主页</a>
+            <a href="https://www.nodeseek.com/space/9191#/general" target="_blank" rel="noopener noreferrer">🥕Nodeseek</a>
+            <a href="https://manji.1143520.xyz/" target="_blank" rel="noopener noreferrer">🍇漫记</a>
+            <a href="https://home.1143520.xyz/" target="_blank" rel="noopener noreferrer">🍒主页</a>
         </div>
     </header>
     <div class="layout">
