@@ -442,6 +442,13 @@ const styles = `
         transform: translateY(2px);
     }
 
+    /* 移动端隐藏音乐播放器 */
+    @media (max-width: 768px) {
+        .music-player {
+            display: none !important;  /* 使用 !important 确保覆盖其他可能的样式 */
+        }
+    }
+
     @media (max-width: 768px) {
         .music-player {
             position: fixed;
@@ -2732,6 +2739,18 @@ const styles = `
     .search-container {
         z-index: 100;
     }
+
+    /* 在 styles 中添加/修改密码错误提示的样式 */
+    .unlock-modal #unlock-error {
+        color: #ff4444;
+        font-size: 0.9rem;
+        margin: 0;
+        opacity: 0;
+        transform: translateY(-10px);
+        transition: all 0.3s ease;
+        min-height: 1.2em;
+        text-align: center;
+    }
 </style>
 `;
 
@@ -3131,7 +3150,70 @@ const HTML_TEMPLATE = `
 
             // 重新初始化PDF查看器
             initPdfViewer();
+
+            // 添加: 重新初始化分页功能
+            initPagination();
         }
+
+        // 添加: 分页功能初始化函数
+        function initPagination() {
+            const prevButton = document.getElementById('prevPage');
+            const nextButton = document.getElementById('nextPage');
+            const pageInfo = document.getElementById('pageInfo');
+            
+            if (prevButton && nextButton && pageInfo) {
+                // 使用函数声明而不是箭头函数
+                prevButton.onclick = function() {
+                    changePage(-1);
+                };
+                nextButton.onclick = function() {
+                    changePage(1);
+                };
+                
+                // 确保当前页码状态正确
+                const currentPage = parseInt(pageInfo.textContent.split('/')[0]);
+                const totalPages = parseInt(pageInfo.textContent.split('/')[1]);
+                
+                // 更新按钮状态
+                prevButton.disabled = currentPage === 1;
+                nextButton.disabled = currentPage === totalPages;
+            }
+        }
+
+        // 修改 changePage 函数，使其成为全局函数
+        window.changePage = function(delta) {
+            const pageInfo = document.getElementById('pageInfo');
+            const prevButton = document.getElementById('prevPage');
+            const nextButton = document.getElementById('nextPage');
+            
+            if (!pageInfo) return;
+            
+            const [current, total] = pageInfo.textContent.split('/').map(Number);
+            const newPage = current + delta;
+            
+            if (newPage >= 1 && newPage <= total) {
+                // 使用常规字符串拼接而不是模板字符串
+                const currentItems = document.querySelectorAll('.post-item[data-page="' + current + '"]');
+                const newItems = document.querySelectorAll('.post-item[data-page="' + newPage + '"]');
+                
+                // 隐藏当前页的文章
+                currentItems.forEach(function(item) {
+                    item.style.display = 'none';
+                });
+                
+                // 显示新页的文章
+                newItems.forEach(function(item) {
+                    item.style.display = 'block';
+                });
+                
+                // 更新页码显示
+                pageInfo.textContent = newPage + '/' + total;
+                
+                // 更新按钮状态
+                prevButton.disabled = newPage === 1;
+                nextButton.disabled = newPage === total;
+            }
+        };
     </script>
 </head>
 <body class="{{page_class}}">
@@ -3588,7 +3670,70 @@ const HTML_TEMPLATE = `
 
         // 重新初始化PDF查看器
         initPdfViewer();
+
+        // 添加: 重新初始化分页功能
+        initPagination();
     }
+
+    // 添加: 分页功能初始化函数
+    function initPagination() {
+        const prevButton = document.getElementById('prevPage');
+        const nextButton = document.getElementById('nextPage');
+        const pageInfo = document.getElementById('pageInfo');
+        
+        if (prevButton && nextButton && pageInfo) {
+            // 使用函数声明而不是箭头函数
+            prevButton.onclick = function() {
+                changePage(-1);
+            };
+            nextButton.onclick = function() {
+                changePage(1);
+            };
+            
+            // 确保当前页码状态正确
+            const currentPage = parseInt(pageInfo.textContent.split('/')[0]);
+            const totalPages = parseInt(pageInfo.textContent.split('/')[1]);
+            
+            // 更新按钮状态
+            prevButton.disabled = currentPage === 1;
+            nextButton.disabled = currentPage === totalPages;
+        }
+    }
+
+    // 修改 changePage 函数，使其成为全局函数
+    window.changePage = function(delta) {
+        const pageInfo = document.getElementById('pageInfo');
+        const prevButton = document.getElementById('prevPage');
+        const nextButton = document.getElementById('nextPage');
+        
+        if (!pageInfo) return;
+        
+        const [current, total] = pageInfo.textContent.split('/').map(Number);
+        const newPage = current + delta;
+        
+        if (newPage >= 1 && newPage <= total) {
+            // 使用常规字符串拼接而不是模板字符串
+            const currentItems = document.querySelectorAll('.post-item[data-page="' + current + '"]');
+            const newItems = document.querySelectorAll('.post-item[data-page="' + newPage + '"]');
+            
+            // 隐藏当前页的文章
+            currentItems.forEach(function(item) {
+                item.style.display = 'none';
+            });
+            
+            // 显示新页的文章
+            newItems.forEach(function(item) {
+                item.style.display = 'block';
+            });
+            
+            // 更新页码显示
+            pageInfo.textContent = newPage + '/' + total;
+            
+            // 更新按钮状态
+            prevButton.disabled = newPage === 1;
+            nextButton.disabled = newPage === total;
+        }
+    };
 
     // 显示加载指示器
     function showLoadingIndicator() {
@@ -3790,7 +3935,7 @@ export default {
         });
     },
 
-    // 处理文章页面请求
+    // 处理文章页请求
     async handlePostPage(path, postList, env, request) {
         const pageClass = 'is-post';
         const postPath = path.replace('/posts/', '');
@@ -3973,10 +4118,11 @@ export default {
                         localStorage.setItem('passwordVersion', currentPasswordVersion);
                         document.getElementById('unlock-modal').style.display = 'none';
                         document.getElementById('main-content').style.display = 'block';
-                        error.classList.remove('show');
+                        error.style.opacity = '0';
                     } else {
                         error.textContent = '密码错误，请重试';
-                        error.classList.add('show');
+                        error.style.opacity = '1';
+                        error.style.transform = 'translateY(0)';
                         input.value = '';
                         input.focus();
                     }
