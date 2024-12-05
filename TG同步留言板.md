@@ -2,7 +2,7 @@
 
 ## 前言
 
-脱胎于项目[1143520/dropbox](https://github.com/1143520/dropbox)，还是使用cloudflare的pages搭建，现在称呼一句TG图床也不为过。
+脱胎于项目[1143520/dropbox](https://github.com/1143520/dropbox)，也可以看教程[🍹 BAOER の BLOG 🍍](https://git-blog-share.1143520.xyz/posts/cf-drop-paste.md)，还是使用cloudflare的pages搭建，现在称呼一句TG图床也不为过。
 
 演示地址：[Drop中转站](https://tg-box.1143520.xyz/)
 
@@ -10,13 +10,15 @@
 
 # 项目地址：[1143520/tg-box](https://github.com/1143520/tg-box)
 
-没开源，因为是改的，本来想可以在CF-KV和TG之间随意切换的，写的太乱了，不丢人显眼了
+因为是改的，本来想可以在CF-KV和TG之间随意切换的，太乱了，不丢人显眼了
 
-有感兴趣的可以联系我，上面的演示地址。
+可以联系我，上面的演示地址。
 
 # 配置截图
 
-## 创建机器人，把机器人拉到你的群组。
+## @BotFather创建机器人，记下 token，把机器人拉到你的群组。再把@raw_data_bot拉进你的群组查看群组的chat id
+
+
 
 ![image-20241206010535706](https://pic.wtr.cc/i/2024/12/06/6751dd80bb84d.jpeg)
 
