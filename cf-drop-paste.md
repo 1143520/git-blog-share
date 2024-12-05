@@ -22,11 +22,11 @@
 
 或者下载源代码修改后上传到自己的仓库
 
-![image-20241201224617107](https://4f3f3863.dropbox-share.pages.dev/images/1733068707436-5euqdor8b2.png)
+![image-20241206014156194](https://pic.wtr.cc/i/2024/12/06/6751e605107c0.jpeg)
 
 2、登录cloudflare打开workers and pages，创建page
 
-![image-20241201224820093](https://pic.wtr.cc/i/2024/12/02/674c92be81e56.jpeg)
+![image-20241206023847785](https://pic.wtr.cc/i/2024/12/06/6751f35897360.jpeg)
 
 
 
@@ -148,7 +148,7 @@ KV的变量名分别是IMAGES 和 FILES，要对应
 
 之后重试部署
 
-![image-20241201231237711](https://4f3f3863.dropbox-share.pages.dev/images/1733069334360-b25y70fkh2d.png)
+![image-20241206014344953](https://pic.wtr.cc/i/2024/12/06/6751e671d418f.jpeg)
 
 
 
@@ -160,7 +160,7 @@ KV的变量名分别是IMAGES 和 FILES，要对应
 
 就是很消耗额度，每天10W免费额度，我才一天消耗了1W多，我在想要是不实时同步，请求次数应该少得多
 
-![](https://4f3f3863.dropbox-share.pages.dev/images/1733069458926-u4q5z8doskk.png)
+![image-20241206014421250](https://pic.wtr.cc/i/2024/12/06/6751e695c678e.jpeg)
 
 演示地址：https://drop-share.1143520.xyz/
 
