@@ -3126,6 +3126,17 @@ const HTML_TEMPLATE = `
                 const markdown = decodeURIComponent(contentDiv.getAttribute('data-markdown'));
                 contentDiv.removeAttribute('data-markdown');
                 contentDiv.innerHTML = marked.parse(markdown);
+                
+                // 处理所有链接，添加新标签页打开属性
+                const links = contentDiv.getElementsByTagName('a');
+                for (let i = 0; i < links.length; i++) {
+                    const link = links[i];
+                    // 只处理外部链接，不处理页内锚点链接
+                    if (!link.getAttribute('href').startsWith('#')) {
+                        link.setAttribute('target', '_blank');
+                        link.setAttribute('rel', 'noopener noreferrer');
+                    }
+                }
             }
             
             // 重新初始化代码高亮
@@ -3646,6 +3657,17 @@ const HTML_TEMPLATE = `
             const markdown = decodeURIComponent(contentDiv.getAttribute('data-markdown'));
             contentDiv.removeAttribute('data-markdown');
             contentDiv.innerHTML = marked.parse(markdown);
+            
+            // 处理所有链接，添加新标签页打开属性
+            const links = contentDiv.getElementsByTagName('a');
+            for (let i = 0; i < links.length; i++) {
+                const link = links[i];
+                // 只处理外部链接，不处理页内锚点链接
+                if (!link.getAttribute('href').startsWith('#')) {
+                    link.setAttribute('target', '_blank');
+                    link.setAttribute('rel', 'noopener noreferrer');
+                }
+            }
         }
         
         // 重新初始化代码高亮
