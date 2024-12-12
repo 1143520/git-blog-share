@@ -28,9 +28,13 @@ https://cn.wordpress.org/wordpress-6.7.1-zh_CN.zip
 
 ## 3、备份以及迁移
 
+使用duplicator插件
+
 先在原来的后台工具-导出-wordpress 会得到一个xml文件
 
 ![image-20241212160143224](https://pic.wtr.cc/i/2024/12/12/675a988a78b00.jpeg)
+
+然后使用duplicator插件，提示路径问题就给0777权限
 
 ![image-20241212160216103](https://pic.wtr.cc/i/2024/12/12/675a98ab06b6c.jpeg)
 
