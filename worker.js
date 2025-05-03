@@ -3,8 +3,12 @@ const CONFIG = {
     // 基础配置
     site: {
         title: '🍹 BAOER の BLOG 🍍',
-        favicon: 'https://pic.wtr.cc/i/2024/11/29/6749922b0967c.jpeg',
+        favicon: 'https://cdn.h5wan.4399sj.com/public/images/report/20250301/45815040_76593000.jpg',
         enablePasswordProtection: false,
+    },
+    // 分页配置
+    pagination: {
+        itemsPerPage: 2
     },
     // 音乐播放器配置
     musicPlayer: {
@@ -67,11 +71,8 @@ const CONFIG = {
         cacheTime: 0, // 缓存时间（毫秒）
         maxRetries: 3, // 最大重试次数
         timeout: 8000 // 请求超时时间（毫秒）
-    },
-    // 分页配置
-    pagination: {
-        itemsPerPage: 5
     }
+
 };
 
 // 古诗词数据
@@ -228,8 +229,10 @@ const apiHandler = {
 
     // 获取文章内容
     async getPostContent(path, env) {
+        // 添加.md后缀进行请求
+        const fullPath = path.endsWith('.md') ? path : path + '.md';
         const response = await fetch(
-            `https://raw.githubusercontent.com/${env.GITHUB_OWNER}/${env.GITHUB_REPO}/main/${path}`,
+            `https://raw.githubusercontent.com/${env.GITHUB_OWNER}/${env.GITHUB_REPO}/main/${fullPath}`,
             {
                 headers: {
                     'Authorization': `Bearer ${env.GITHUB_TOKEN}`,
@@ -352,7 +355,7 @@ const htmlGenerator = {
                 <div class="post-list" id="postList">
                     ${posts.map((post, index) => `
                         <div class="post-item" style="display: ${index < CONFIG.pagination.itemsPerPage ? 'block' : 'none'}" data-page="${Math.floor(index / CONFIG.pagination.itemsPerPage) + 1}">
-                            <a href="${post.url}">
+                            <a href="${post.url.replace('.md', '')}">
                                 <div class="post-title">${post.type === 'pdf' ? '💾' : '📝'} ${post.name.replace('.md', '').replace('.pdf', '')}</div>
                                 <div class="post-date" style="text-align: right;">${post.lastModified ? `📅 ${utils.formatDate(post.lastModified)}` : '❌ 获取时间失败'}</div>
                             </a>
@@ -360,9 +363,13 @@ const htmlGenerator = {
                     `).join('')}
                 </div>
                 <div class="pagination">
-                    <button id="prevPage" onclick="changePage(-1)" disabled>⏮</button>
-                    <span id="pageInfo">1/${totalPages}</span>
-                    <button id="nextPage" onclick="changePage(1)" ${totalPages <= 1 ? 'disabled' : ''}>⏭</button>
+                    <button id="prevPage" onclick="changePage(-1)" disabled>✏️</button>
+                    <input type="number" id="pageInput" min="1" max="${totalPages}" value="1" 
+                           style="width: 40px; text-align: center; margin: 0 5px; border: 1px solid var(--border-color); 
+                                  border-radius: 4px; background: var(--content-bg); color: var(--main-text-color);"
+                           onkeydown="if(event.key === 'Enter') goToPage(this.value)">
+                    <span style="color: var(--main-text-color); margin-right: 5px;">/ ${totalPages}</span>
+                    <button id="nextPage" onclick="changePage(1)" ${totalPages <= 1 ? 'disabled' : ''}>✒️</button>
                 </div>
             </div>
             <script>
@@ -382,8 +389,36 @@ const htmlGenerator = {
                         
                         document.getElementById('prevPage').disabled = currentPage === 1;
                         document.getElementById('nextPage').disabled = currentPage === totalPages;
-                        document.getElementById('pageInfo').textContent = currentPage + '/' + totalPages;
+                        document.getElementById('pageInput').value = currentPage;
                     }
+                }
+                
+                function goToPage(pageNum) {
+                    pageNum = parseInt(pageNum);
+                    
+                    // 验证输入是否合法
+                    if (isNaN(pageNum) || pageNum < 1 || pageNum > totalPages) {
+                        // 恢复输入框为当前页码
+                        document.getElementById('pageInput').value = currentPage;
+                        return;
+                    }
+                    
+                    // 如果新页码和当前页码一样，不做任何操作
+                    if (pageNum === currentPage) {
+                        return;
+                    }
+                    
+                    document.querySelectorAll('.post-item[data-page="' + currentPage + '"]')
+                        .forEach(item => item.style.display = 'none');
+                        
+                    document.querySelectorAll('.post-item[data-page="' + pageNum + '"]')
+                        .forEach(item => item.style.display = 'block');
+                        
+                    currentPage = pageNum;
+                    
+                    document.getElementById('prevPage').disabled = currentPage === 1;
+                    document.getElementById('nextPage').disabled = currentPage === totalPages;
+                    document.getElementById('pageInput').value = currentPage;
                 }
             </script>
         `;
@@ -655,9 +690,11 @@ const styles = `
         .sidebar {
             position: static;
             width: 100%;
-            height: auto;
+            height: 70vh; /* 设置为视口高度的70%，保证有足够空间 */
+            max-height: calc(100vh - 150px); /* 确保有足够空间显示底部的分页控件 */
             padding: 10px;
-            overflow: visible;
+            overflow-y: auto; /* 修改为auto，允许垂直滚动 */
+            padding-bottom: 60px; /* 为底部分页控件留出空间 */
         }
 
         .toc {
@@ -829,7 +866,33 @@ const styles = `
         top: 0;
         height: 100vh;
         overflow-y: auto;
+        transition: transform 0.3s ease, opacity 0.3s ease;
     }
+
+    /* 侧边栏隐藏状态 */
+    .sidebar.collapsed {
+        transform: translateX(-100%);
+        opacity: 0;
+        position: absolute;
+        z-index: 50;
+    }
+
+    /* 当侧边栏收起时，内容区域占满 */
+    .content.full-width {
+        margin-left: 0;
+        width: 100%;
+    }
+
+    @media (max-width: 768px) {
+        .sidebar-toggle {
+            left: 15px;
+            bottom: 15px;
+            width: 35px;
+            height: 35px;
+            font-size: 16px;
+        }
+    }
+
     .content {
         flex: 1;
         min-width: 0;
@@ -1346,7 +1409,7 @@ const styles = `
     .pagination span {
         color: var(--main-text-color);
         font-size: 0.875rem;
-        min-width: 5rem;
+        min-width: 1rem;
         text-align: center;
     }
 
@@ -2139,8 +2202,36 @@ const styles = `
     .pagination span {
         color: var(--main-text-color);
         font-size: 0.875rem;
-        min-width: 5rem;
+        min-width: 1rem;
         text-align: center;
+    }
+    
+    .pagination input {
+        width: 2.5rem;
+        text-align: center;
+        padding: 0.375rem 0.5rem;
+        border: 1px solid var(--border-color);
+        background: var(--content-bg);
+        color: var(--main-text-color);
+        border-radius: 0.25rem;
+        font-size: 0.875rem;
+        transition: all 0.2s ease;
+    }
+    
+    .pagination input:focus {
+        outline: none;
+        border-color: var(--link-color);
+        box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+    }
+    
+    .pagination input::-webkit-inner-spin-button,
+    .pagination input::-webkit-outer-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+    }
+    
+    .pagination input[type=number] {
+        -moz-appearance: textfield;
     }
 
     /* 移动端分页样式适配 */
@@ -2161,6 +2252,12 @@ const styles = `
         .pagination span {
             font-size: 0.75rem;
             min-width: 4rem;
+        }
+        
+        .pagination input {
+            width: 2rem;
+            padding: 0.25rem;
+            font-size: 0.75rem;
         }
     }
 
@@ -2201,9 +2298,12 @@ const styles = `
         .sidebar, .toc {
             position: static;
             width: 100%;
-            height: auto;
+            height: 70vh; /* 限制高度，确保可滚动 */
+            max-height: calc(100vh - 150px);
             flex: none;
             padding: 0.75rem;
+            padding-bottom: 60px; /* 为分页控件留出空间 */
+            overflow-y: auto; /* 允许垂直滚动 */
         }
 
         .content {
@@ -2626,38 +2726,26 @@ const styles = `
     .theme-toggle,
     .search-toggle {
         position: fixed;
-        right: 1.25rem;  /* 20px -> 1.25rem */
-        width: 2rem;   /* 40px -> 2.5rem */
-        height: 2rem;  /* 40px -> 2.5rem */
-        background: var(--link-color);
-        color: #fff;
-        border: none;
+        right: 1.25rem;
+        width: 2.5rem;
+        height: 2.5rem;
+        /* 移除原有的背景色 */
+        background: transparent;
+        /* 添加毛玻璃效果 */
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        background: rgba(255, 255, 255, 0.1);
+        color: var(--main-text-color);
+        border: 1px solid rgba(255, 255, 255, 0.1);
         border-radius: 50%;
         cursor: pointer;
         z-index: 100;
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 1.25rem;  /* 20px -> 1.25rem */
-        transition: opacity 0.3s;
-        opacity: 0.75;
-    }
-
-    /* 按钮位置 */
-    .back-top {
-        bottom: 1.25rem;  /* 20px -> 1.25rem */
-    }
-
-    .comment-button {
-        bottom: 4rem;  /* 70px -> 4.375rem */
-    }
-
-    .theme-toggle {
-        bottom: 6.75rem;  /* 120px -> 7.5rem */
-    }
-
-    .search-toggle {
-        bottom: 9.5rem;  /* 170px -> 10.625rem */
+        font-size: 1.25rem;
+        transition: all 0.3s ease;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
     }
 
     /* 按钮悬停效果 */
@@ -2665,53 +2753,67 @@ const styles = `
     .comment-button:hover,
     .theme-toggle:hover,
     .search-toggle:hover {
-        opacity: 0.9;
+        transform: translateY(-2px);
+        background: rgba(255, 255, 255, 0.2);
+        box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
+    }
+
+    /* 按钮位置 */
+    .back-top {
+        bottom: 1.25rem;
+    }
+
+    .comment-button {
+        bottom: 4.375rem;
+    }
+
+    .theme-toggle {
+        bottom: 7.5rem;
+    }
+
+    .search-toggle {
+        bottom: 10.625rem;
     }
 
     /* 移动端适配 */
-    @media (max-width: 48rem) {  /* 768px -> 48rem */
+    @media (max-width: 48rem) {
         .back-top,
         .comment-button,
         .theme-toggle,
         .search-toggle {
-            right: 0.9375rem;  /* 15px -> 0.9375rem */
-            width: 2.1875rem;  /* 35px -> 2.1875rem */
-            height: 2.1875rem; /* 35px -> 2.1875rem */
-            font-size: 1rem;   /* 16px -> 1rem */
+            right: 0.9375rem;
+            width: 2.1875rem;
+            height: 2.1875rem;
+            font-size: 1rem;
         }
 
         .back-top {
-            bottom: 0.9375rem;  /* 15px -> 0.9375rem */
+            bottom: 0.9375rem;
         }
 
         .comment-button {
-            bottom: 3.75rem;    /* 60px -> 3.75rem */
+            bottom: 3.75rem;
         }
 
         .theme-toggle {
-            bottom: 6.5625rem;  /* 105px -> 6.5625rem */
+            bottom: 6.5625rem;
         }
 
         .search-toggle {
-            bottom: 9.375rem;   /* 150px -> 9.375rem */
+            bottom: 9.375rem;
         }
     }
 
     /* 返回顶部按钮默认隐藏 */
     .back-top {
-        bottom: 1.25rem;  /* 20px -> 1.25rem */
         opacity: 0;
         visibility: hidden;
-        transition: opacity 0.3s, visibility 0.3s;
+        transition: all 0.3s ease;
     }
 
     .back-top.show {
-        opacity: 0.75;
+        opacity: 1;
         visibility: visible;
-    }
-
-    .back-top:hover {
-        opacity: 0.9;
     }
 
     /* 搜索遮罩层 */
@@ -3170,9 +3272,9 @@ const HTML_TEMPLATE = `
         function initPagination() {
             const prevButton = document.getElementById('prevPage');
             const nextButton = document.getElementById('nextPage');
-            const pageInfo = document.getElementById('pageInfo');
+            const pageInput = document.getElementById('pageInput');
             
-            if (prevButton && nextButton && pageInfo) {
+            if (prevButton && nextButton && pageInput) {
                 // 使用函数声明而不是箭头函数
                 prevButton.onclick = function() {
                     changePage(-1);
@@ -3181,9 +3283,18 @@ const HTML_TEMPLATE = `
                     changePage(1);
                 };
                 
+                // 添加页码输入框事件
+                if (pageInput) {
+                    pageInput.onkeydown = function(event) {
+                        if (event.key === 'Enter') {
+                            goToPage(this.value);
+                        }
+                    };
+                }
+                
                 // 确保当前页码状态正确
-                const currentPage = parseInt(pageInfo.textContent.split('/')[0]);
-                const totalPages = parseInt(pageInfo.textContent.split('/')[1]);
+                const currentPage = parseInt(pageInput.value);
+                const totalPages = parseInt(pageInput.max);
                 
                 // 更新按钮状态
                 prevButton.disabled = currentPage === 1;
@@ -3193,13 +3304,15 @@ const HTML_TEMPLATE = `
 
         // 修改 changePage 函数，使其成为全局函数
         window.changePage = function(delta) {
-            const pageInfo = document.getElementById('pageInfo');
             const prevButton = document.getElementById('prevPage');
             const nextButton = document.getElementById('nextPage');
+            const pageInput = document.getElementById('pageInput');
             
-            if (!pageInfo) return;
+            if (!pageInput) return;
             
-            const [current, total] = pageInfo.textContent.split('/').map(Number);
+            // 获取当前页码和总页数
+            const current = parseInt(pageInput.value);
+            const total = parseInt(pageInput.max);
             const newPage = current + delta;
             
             if (newPage >= 1 && newPage <= total) {
@@ -3217,13 +3330,57 @@ const HTML_TEMPLATE = `
                     item.style.display = 'block';
                 });
                 
-                // 更新页码显示
-                pageInfo.textContent = newPage + '/' + total;
-                
                 // 更新按钮状态
                 prevButton.disabled = newPage === 1;
                 nextButton.disabled = newPage === total;
+                
+                // 更新输入框
+                pageInput.value = newPage;
             }
+        };
+        
+        // 添加全局页码跳转函数
+        window.goToPage = function(pageNum) {
+            const prevButton = document.getElementById('prevPage');
+            const nextButton = document.getElementById('nextPage');
+            const pageInput = document.getElementById('pageInput');
+            
+            if (!pageInput) return;
+            
+            const current = parseInt(pageInput.value);
+            const total = parseInt(pageInput.max);
+            pageNum = parseInt(pageNum);
+            
+            // 检查页码是否有效，如果无效则恢复为当前页码
+            if (isNaN(pageNum) || pageNum < 1 || pageNum > total) {
+                pageInput.value = current;
+                return;
+            }
+            
+            // 如果新页码与当前相同，不做任何操作
+            if (pageNum === current) {
+                return;
+            }
+            
+            // 开始页面切换
+            // 隐藏当前页的文章
+            const currentItems = document.querySelectorAll('.post-item[data-page="' + current + '"]');
+            currentItems.forEach(function(item) {
+                item.style.display = 'none';
+            });
+            
+            // 显示新页的文章
+            const newItems = document.querySelectorAll('.post-item[data-page="' + pageNum + '"]');
+            newItems.forEach(function(item) {
+                item.style.display = 'block';
+            });
+            
+            // 更新按钮状态
+            prevButton.disabled = pageNum === 1;
+            nextButton.disabled = pageNum === total;
+            
+            // 更新输入框
+            pageInput.value = pageNum;
         };
     </script>
 </head>
@@ -3253,7 +3410,7 @@ const HTML_TEMPLATE = `
         </aside>
     </div>
     <button class="back-top" aria-label="返回顶部">🌶️</button>
-    <a href="https://liuyan.1143520.xyz/" target="_blank" class="comment-button" aria-label="留言板" rel="noopener noreferrer">🥝</a>
+    <button class="comment-button" onclick="toggleSidebar()" aria-label="切换侧边栏">🥝</button>
     <button class="theme-toggle" onclick="toggleTheme()" aria-label="切换主题">🍅</button>
     <div class="search-overlay"></div>
     <div class="search-container hidden">
@@ -3432,6 +3589,7 @@ const HTML_TEMPLATE = `
     // 在页面加载完成后初始化搜索功能
     window.addEventListener('load', function() {
         initSearch();
+        initSidebarState();
         
         // 添加滚动监听
         window.addEventListener('scroll', function() {
@@ -3442,6 +3600,52 @@ const HTML_TEMPLATE = `
                 backTop.classList.remove('show');
             }
         });
+    });
+
+    // 侧边栏显示/隐藏控制
+    function toggleSidebar() {
+        const sidebar = document.querySelector('.sidebar');
+        const content = document.querySelector('.content');
+        const sidebarToggle = document.querySelector('.comment-button');
+        
+        // 切换侧边栏状态
+        sidebar.classList.toggle('collapsed');
+        
+        // 当侧边栏收起时，内容区域占满
+        content.classList.toggle('full-width');
+        
+        // 保存侧边栏状态到localStorage
+        const isSidebarCollapsed = sidebar.classList.contains('collapsed');
+        localStorage.setItem('sidebarCollapsed', isSidebarCollapsed);
+        
+        // 直接控制显示/隐藏，解决任何可能的样式冲突
+        if (isSidebarCollapsed) {
+            sidebar.style.display = 'none';
+            sidebarToggle.innerHTML = '📂';
+        } else {
+            sidebar.style.display = '';
+            sidebarToggle.innerHTML = '🥝';
+        }
+    }
+    
+    // 初始化侧边栏状态
+    function initSidebarState() {
+        const isSidebarCollapsed = localStorage.getItem('sidebarCollapsed') === 'true';
+        const sidebar = document.querySelector('.sidebar');
+        const content = document.querySelector('.content');
+        const sidebarToggle = document.querySelector('.comment-button');
+        
+        if (isSidebarCollapsed) {
+            sidebar.classList.add('collapsed');
+            content.classList.add('full-width');
+            sidebar.style.display = 'none';
+            sidebarToggle.innerHTML = '📂';
+        }
+    }
+    
+    // 页面加载时初始化侧边栏状态
+    window.addEventListener('load', function() {
+        initSidebarState();
     });
 </script>
 <script>
@@ -3701,9 +3905,9 @@ const HTML_TEMPLATE = `
     function initPagination() {
         const prevButton = document.getElementById('prevPage');
         const nextButton = document.getElementById('nextPage');
-        const pageInfo = document.getElementById('pageInfo');
+        const pageInput = document.getElementById('pageInput');
         
-        if (prevButton && nextButton && pageInfo) {
+        if (prevButton && nextButton && pageInput) {
             // 使用函数声明而不是箭头函数
             prevButton.onclick = function() {
                 changePage(-1);
@@ -3712,9 +3916,18 @@ const HTML_TEMPLATE = `
                 changePage(1);
             };
             
+            // 添加页码输入框事件
+            if (pageInput) {
+                pageInput.onkeydown = function(event) {
+                    if (event.key === 'Enter') {
+                        goToPage(this.value);
+                    }
+                };
+            }
+            
             // 确保当前页码状态正确
-            const currentPage = parseInt(pageInfo.textContent.split('/')[0]);
-            const totalPages = parseInt(pageInfo.textContent.split('/')[1]);
+            const currentPage = parseInt(pageInput.value);
+            const totalPages = parseInt(pageInput.max);
             
             // 更新按钮状态
             prevButton.disabled = currentPage === 1;
@@ -3724,13 +3937,15 @@ const HTML_TEMPLATE = `
 
     // 修改 changePage 函数，使其成为全局函数
     window.changePage = function(delta) {
-        const pageInfo = document.getElementById('pageInfo');
         const prevButton = document.getElementById('prevPage');
         const nextButton = document.getElementById('nextPage');
+        const pageInput = document.getElementById('pageInput');
         
-        if (!pageInfo) return;
+        if (!pageInput) return;
         
-        const [current, total] = pageInfo.textContent.split('/').map(Number);
+        // 获取当前页码和总页数
+        const current = parseInt(pageInput.value);
+        const total = parseInt(pageInput.max);
         const newPage = current + delta;
         
         if (newPage >= 1 && newPage <= total) {
@@ -3748,12 +3963,12 @@ const HTML_TEMPLATE = `
                 item.style.display = 'block';
             });
             
-            // 更新页码显示
-            pageInfo.textContent = newPage + '/' + total;
-            
             // 更新按钮状态
             prevButton.disabled = newPage === 1;
             nextButton.disabled = newPage === total;
+            
+            // 更新输入框
+            pageInput.value = newPage;
         }
     };
 
