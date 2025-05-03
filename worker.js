@@ -8,7 +8,7 @@ const CONFIG = {
     },
     // 分页配置
     pagination: {
-        itemsPerPage: 2
+        itemsPerPage: 5
     },
     // 音乐播放器配置
     musicPlayer: {
